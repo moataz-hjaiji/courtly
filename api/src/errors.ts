@@ -22,3 +22,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(500).json({ error: { code: 'INTERNAL', message: 'Something went wrong' } });
   }
 };
+
+/** Postgres SQLSTATE of a driver error, e.g. '23505' unique, '23514' check, '23P01' exclusion. */
+export const pgCode = (err: unknown): string | undefined =>
+  typeof err === 'object' && err !== null && 'code' in err ? String(err.code) : undefined;

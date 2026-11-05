@@ -5,7 +5,7 @@ import { pool, withTx } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { findCourt } from './courts.js';
-import { checkSlotRules, slotBody } from '../slots.js';
+import { checkSlotRules, fitsOpeningHours, slotBody } from '../slots.js';
 import { atHour, HOUR_MS } from '../time.js';
 
 export const waitlistRouter = Router();
@@ -85,8 +85,10 @@ waitlistRouter.post('/:id/leave', async (req, res) => {
  * so it can't hide the entry from a concurrent cancellation that could have promoted it.
  */
 export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStart: Date, freedEnd: Date): Promise<number[]> {
-  const { rows: candidates } = await tx.query<{ id: number; user_id: number; start_at: Date; end_at: Date; hourly_price_cents: number }>(
-    `SELECT w.id, w.user_id, w.start_at, w.end_at, c.hourly_price_cents
+  const { rows: candidates } = await tx.query<{
+    id: number; user_id: number; start_at: Date; end_at: Date; hourly_price_cents: number; open_hour: number; close_hour: number;
+  }>(
+    `SELECT w.id, w.user_id, w.start_at, w.end_at, c.hourly_price_cents, c.open_hour, c.close_hour
      FROM waitlist_entries w JOIN courts c ON c.id = w.court_id
      WHERE w.court_id = $1 AND w.status = 'waiting' AND c.is_active AND w.start_at > now()
        AND tstzrange(w.start_at, w.end_at, '[)') && tstzrange($2, $3, '[)')
@@ -95,6 +97,10 @@ export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStar
   );
   const promoted: number[] = [];
   for (const w of candidates) {
+    const hours = (w.end_at.getTime() - w.start_at.getTime()) / HOUR_MS;
+    // The court's hours may have changed since this person joined: only promote into today's opening hours.
+    if (!fitsOpeningHours({ openHour: w.open_hour, closeHour: w.close_hour }, w.start_at.getUTCHours(), hours)) continue;
+
     await tx.query('SAVEPOINT promote');
     try {
       const { rowCount } = await tx.query(
@@ -105,7 +111,6 @@ export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStar
         await tx.query('ROLLBACK TO SAVEPOINT promote'); // already handled by another transaction
         continue;
       }
-      const hours = (w.end_at.getTime() - w.start_at.getTime()) / HOUR_MS;
       const { rows } = await tx.query<{ id: number }>(
         'INSERT INTO bookings (court_id, user_id, start_at, end_at, price_cents) VALUES ($1, $2, $3, $4, $5) RETURNING id',
         [courtId, w.user_id, w.start_at, w.end_at, w.hourly_price_cents * hours],

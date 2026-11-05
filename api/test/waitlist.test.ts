@@ -102,6 +102,15 @@ describe('auto-promotion on cancellation', () => {
     expect(got[0].end_at.getTime() - got[0].start_at.getTime()).toBe(2 * 60 * 60 * 1000);
   });
 
+  it('does not promote into hours the court no longer opens', async () => {
+    const late = await alice.post('/bookings', slot(22));
+    await bob.post('/waitlist', slot(22)).expect(201);
+    await admin.patch('/courts/1', { closeHour: 22 }).expect(200); // court now closes before the waited-for slot
+
+    await alice.post(`/bookings/${late.body.id}/cancel`).expect(200);
+    expect(await bookingsOf(3)).toHaveLength(0);
+  });
+
   it('does not promote someone who left the waitlist', async () => {
     const booking = await alice.post('/bookings', slot(10));
     const entry = await bob.post('/waitlist', slot(10));

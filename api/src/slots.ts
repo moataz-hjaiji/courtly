@@ -11,9 +11,13 @@ export const slotBody = z.object({
   hours: z.union([z.literal(1), z.literal(2)]),
 });
 
+/** True if [startHour, startHour + hours) lies within the court's opening hours. */
+export const fitsOpeningHours = (court: Pick<Court, 'openHour' | 'closeHour'>, startHour: number, hours: number) =>
+  startHour >= court.openHour && startHour + hours <= court.closeHour;
+
 /** Rules shared by booking and joining the waitlist. Throws a 422 AppError when a rule is broken. */
 export function checkSlotRules(court: Court, startHour: number, hours: number, startAt: Date): void {
-  if (startHour < court.openHour || startHour + hours > court.closeHour) {
+  if (!fitsOpeningHours(court, startHour, hours)) {
     throw new AppError(
       422,
       'OUTSIDE_OPENING_HOURS',

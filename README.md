@@ -27,8 +27,8 @@ All times are UTC.
 ### Tests
 
 ```bash
-docker compose --profile test run --rm api-test   # backend: 47 tests against a real Postgres
-docker compose --profile test run --rm web-test   # frontend: 64 tests in jsdom
+docker compose --profile test run --rm --build api-test   # backend: 47 tests against a real Postgres
+docker compose --profile test run --rm --build web-test   # frontend: 64 tests in jsdom
 ```
 
 - **Backend** (Vitest + supertest) runs against a real Postgres database (`courtly_test`), because the
@@ -109,8 +109,9 @@ trade-off is hand-mapping columns (`AS "camelCase"` in the queries) and no gener
 | Rule | Enforced in |
 |---|---|
 | No double bookings, also under concurrency | `bookings_no_overlap` exclusion constraint — [api/migrations/001_init.sql](api/migrations/001_init.sql) |
-| Booking is 1 or 2 hours, starts on the hour | `CHECK` constraints in the same migration, plus zod in [bookings.ts](api/src/routes/bookings.ts) |
-| Within opening hours, not in the past, court active | `checkSlotRules` in [slots.ts](api/src/slots.ts), used by booking and waitlist, with the court row locked |
+| Booking is 1 or 2 hours, starts on the hour | `CHECK` constraints in the same migration, plus zod `slotBody` in [slots.ts](api/src/slots.ts) |
+| Within opening hours, not in the past, not too far ahead | `checkSlotRules` in [slots.ts](api/src/slots.ts), used by booking and waitlist |
+| Court must be active | `findCourt(id, false, tx)` in [courts.ts](api/src/routes/courts.ts), which also locks the court row `FOR SHARE` |
 | Cancel up to 2h before start | One atomic `UPDATE` in `POST /bookings/:id/cancel` |
 | Deactivating keeps history | No `DELETE` route; `PATCH { isActive: false }` — [courts.ts](api/src/routes/courts.ts) |
 | Deactivating cancels future bookings | Same `PATCH`, in one transaction: future confirmed bookings → `cancelled` with `cancel_reason = 'court_deactivated'`, waitlist entries → `cancelled`. Past and running bookings stay. The admin confirms first (UI shows the count). |
@@ -205,7 +206,7 @@ How it is built ([api/migrations/002_waitlist.sql](api/migrations/002_waitlist.s
 
 ```bash
 docker compose up -d db
-docker compose --profile test run --rm api-test npm run perf
+docker compose --profile test run --rm --build api-test npm run perf
 ```
 
 It takes about 15 seconds. It uses its own database, `courtly_perf`, so the demo data in `courtly` is not touched.

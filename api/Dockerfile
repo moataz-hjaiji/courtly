@@ -2,7 +2,7 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json vitest.config.ts ./
+COPY tsconfig.json tsconfig.test.json vitest.config.ts ./
 COPY src ./src
 COPY migrations ./migrations
 COPY test ./test

@@ -33,6 +33,14 @@ docker compose --profile test run --rm api-test
 Runs the API test suite (Vitest + supertest) against a real Postgres database (`courtly_test`).
 Locally: `docker compose up -d db && cd api && npm ci && npm test`.
 
+### Without Docker for the apps (dev mode)
+
+```bash
+docker compose up -d db
+cd api && npm ci && npm run migrate && npm run seed && npm run dev   # :3000 (PORT=... to change)
+cd web && npm ci && npm run dev                                       # :5173 (API_URL=http://localhost:<port> if not 3000)
+```
+
 ## API
 
 All errors are `{ "error": { "code", "message" } }`. 400 invalid input, 401 not logged in, 403 wrong role,

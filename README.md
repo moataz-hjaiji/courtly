@@ -90,21 +90,17 @@ past booking, cancellation window).
 
 ## Stack choices
 
-**React + Vite, not Next.js.** Everything sits behind a login, so server-side rendering and SEO bring nothing, and the
-brief requires a separate backend anyway, which leaves Next's route handlers and server components unused. A plain
-Vite SPA is one static bundle that nginx serves next to the API. The trade-off is no SSR and no file-based routing;
-with four screens, simple tab state is enough.
+**React + Vite, not Next.js.** The whole app is behind a login, so server rendering and SEO from Next bring nothing,
+and the brief asks for a separate backend anyway. Vite builds one static bundle that nginx serves next to the API;
+the trade-off is no SSR and no file-based routing, which four screens don't need.
 
-**Express, not NestJS.** The API has about a dozen endpoints. In Express every request path is visible in one file:
-route → zod validation → SQL → JSON, with no decorators, DI container or module wiring to trace. That makes the code
-easy to change during a review. Express 5 also forwards errors from async handlers to the error middleware natively.
-The trade-off is that structure is by convention, not enforced; Nest's modules and DI pay off with a larger team or
-codebase.
+**Express, not NestJS.** The API has about 15 endpoints, and in Express each request is easy to follow: route → zod
+validation → SQL → JSON. Nest's modules and dependency injection would be more setup than code at this size; the
+trade-off is that the structure is a convention, not enforced, so Nest would pay off with a bigger team.
 
-**PostgreSQL with plain SQL (`pg`), no ORM.** The core rule, no overlapping bookings, can be a database invariant in
-Postgres thanks to exclusion constraints over time ranges; MySQL and MongoDB have no equivalent. Since the key schema
-feature is raw SQL anyway (`EXCLUDE USING gist`, `tstzrange`), an ORM would add a layer without hiding much. The
-trade-off is hand-mapping columns (`AS "camelCase"` in the queries) and no generated types for query results.
+**PostgreSQL with plain SQL, no ORM.** Postgres can block double bookings by itself with an exclusion constraint on
+time ranges, and MySQL and MongoDB have no equivalent. I used plain SQL (`pg`) because that key feature is raw SQL
+anyway; the trade-off is mapping columns by hand and no generated types for query results.
 
 ## Where each rule lives
 
@@ -312,18 +308,21 @@ Admin day-view query plan  (/admin/bookings?date=2026-11-05)
 
 ## What I would do next
 
-1. **Facility time zone.** Everything runs in UTC now. Add a `timezone` setting and convert opening hours and "today"
+1. **Refunds.** When a court is deactivated, its future bookings are cancelled, but nobody gets their money back.
+   I'd add a payment status to bookings (paid / refunded), refund automatically when the facility cancels, and tell
+   the player.
+2. **Facility time zone.** Everything runs in UTC now. Add a `timezone` setting and convert opening hours and "today"
    with a time-zone library, testing a daylight-saving day where a day has 23 or 25 hours.
-2. **Shortening a court's hours.** Deactivating already cancels future bookings, but making opening hours shorter
+3. **Shortening a court's hours.** Deactivating already cancels future bookings, but making opening hours shorter
    still leaves bookings outside the new hours. Show them to the admin and cancel them the same way, and notify the
    players (email) in both cases.
-3. **Safer sessions.** Move the JWT from `localStorage` to an `httpOnly` cookie with a refresh token, add rate
+4. **Safer sessions.** Move the JWT from `localStorage` to an `httpOnly` cookie with a refresh token, add rate
    limiting on `/auth/login`, and refuse to start in production without a real `JWT_SECRET`.
-4. **Real-time across instances** with Postgres `LISTEN/NOTIFY`, and on the booking page a "live" indicator that
+5. **Real-time across instances** with Postgres `LISTEN/NOTIFY`, and on the booking page a "live" indicator that
    reloads after a reconnect.
-5. **End-to-end test.** One Playwright run against `docker compose up` (login → book → cancel → waitlist promotion
+6. **End-to-end test.** One Playwright run against `docker compose up` (login → book → cancel → waitlist promotion
    across two browsers), on top of the unit and page tests.
-6. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
+7. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
    choose to be asked first (with a time limit) instead of being booked automatically.
-7. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
+8. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
    with a reason.

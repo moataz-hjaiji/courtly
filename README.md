@@ -157,8 +157,9 @@ Two related races are closed the same way, by letting Postgres order things:
 
 ## Bonus features
 
-The brief asks candidates to pick **at most one** bonus. This reference solution implements all three (real-time
-availability, the waitlist and the performance note) so students can study each one. In a real submission, pick one and finish it well.
+The brief asks for **at most one** bonus. This submission includes all three: real-time availability, the waitlist
+and the performance note. The core was finished and tested first; each bonus has its own section, code and tests
+below.
 
 ### Real-time availability
 

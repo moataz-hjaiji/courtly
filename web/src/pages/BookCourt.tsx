@@ -51,30 +51,45 @@ export function BookCourt() {
   }, [courtId, date, loadSlots])
 
   const court = courts.find((c) => c.id === courtId)
+
+  // --- Rules for one hour on the grid ---------------------------------------------------------
   const slotAt = (h: number) => slots.find((s) => s.hour === h)
   const isFree = (h: number) => slotAt(h)?.status === 'available'
   const isFuture = (h: number) => { const s = slotAt(h); return !!s && new Date(s.startAt).getTime() > Date.now() }
-  // My waitlist entry covering this hour on the court/day on screen, if any.
+  /** My waitlist entry covering this hour on the court/day on screen, if any. */
   const waitingAt = (h: number) => waitlist.find((w) => {
-    if (w.courtId !== courtId) return false
     const t = new Date(`${date}T${String(h).padStart(2, '0')}:00:00Z`).getTime()
-    return new Date(w.startAt).getTime() <= t && t < new Date(w.endAt).getTime()
+    return w.courtId === courtId && new Date(w.startAt).getTime() <= t && t < new Date(w.endAt).getTime()
   })
+  /** Booked by someone else, still ahead, and I'm not already waiting for it. */
   const canWaitlist = (h: number) => slotAt(h)?.status === 'taken' && !slotAt(h)?.mine && isFuture(h) && !waitingAt(h)
 
-  // Derived, so a live update that changes the selected slot (or the hour after it) hides/limits the choice.
-  const mode: 'book' | 'waitlist' | null = selected === null ? null : isFree(selected) ? 'book' : canWaitlist(selected) ? 'waitlist' : null
-  const canTwoHours = selected !== null && (mode === 'book' ? isFree(selected + 1) : mode === 'waitlist' && isFuture(selected + 1) && slotAt(selected + 1)?.status !== 'past')
-  const duration: 1 | 2 = canTwoHours ? hours : 1
+  // --- What the user can do with the selected hour --------------------------------------------
+  // Derived on every render, so a live update that takes the selected hour (or the next one) hides/limits the choice.
+  const mode: 'book' | 'waitlist' | null =
+    selected === null ? null : isFree(selected) ? 'book' : canWaitlist(selected) ? 'waitlist' : null
+  // 2 hours needs the next hour too: free to book it; ahead and not already mine to wait for it.
+  const nextHourUsable = selected !== null && (mode === 'book'
+    ? isFree(selected + 1)
+    : mode === 'waitlist' && isFuture(selected + 1) && !slotAt(selected + 1)?.mine)
+  const duration: 1 | 2 = nextHourUsable ? hours : 1
   const freeCount = slots.filter((s) => s.status === 'available').length
 
-  async function joinWaitlist() {
-    if (!court || mode !== 'waitlist' || selected === null) return
+  /** Books the selection, or joins its waitlist, then refreshes the grid either way. */
+  async function submit() {
+    if (!court || !mode || selected === null) return
+    const body = { courtId: court.id, date, startHour: selected, hours: duration }
+    const when = `${court.name}, ${dayLabel(date)} ${pad(selected)}–${pad(selected + duration)}`
     setNotice(null)
     setBusy(true)
     try {
-      const w = await api<WaitlistEntry>('/waitlist', { method: 'POST', body: { courtId: court.id, date, startHour: selected, hours: duration } })
-      setNotice({ kind: 'success', text: `You're #${w.position} on the waitlist for ${court.name}, ${pad(selected)}–${pad(selected + duration)}. If it frees up, it's booked for you automatically.` })
+      if (mode === 'book') {
+        const b = await api<Booking>('/bookings', { method: 'POST', body })
+        setNotice({ kind: 'success', text: `Booked ${when} · ${money(b.priceCents)}` })
+      } else {
+        const w = await api<WaitlistEntry>('/waitlist', { method: 'POST', body })
+        setNotice({ kind: 'success', text: `You're #${w.position} on the waitlist for ${when}. If it frees up, it's booked for you automatically.` })
+      }
     } catch (e) {
       setNotice({ kind: 'error', text: errorText(e) })
     }
@@ -83,19 +98,21 @@ export function BookCourt() {
     loadSlots()
   }
 
-  async function book() {
-    if (!court || mode !== 'book' || selected === null) return
-    setNotice(null)
-    setBusy(true)
-    try {
-      const b = await api<Booking>('/bookings', { method: 'POST', body: { courtId: court.id, date, startHour: selected, hours: duration } })
-      setNotice({ kind: 'success', text: `Booked ${b.courtName} on ${dayLabel(date)}, ${pad(selected)}–${pad(selected + duration)} · ${money(b.priceCents)}` })
-    } catch (e) {
-      setNotice({ kind: 'error', text: errorText(e) })
-    }
-    setBusy(false)
-    setSelected(null)
-    loadSlots()
+  /** Small text under the time in each slot. */
+  function slotLabel(s: Slot): string {
+    const entry = waitingAt(s.hour)
+    if (s.mine) return 'Your booking'
+    if (entry) return `Waitlist #${entry.position}`
+    if (s.status === 'available') return court ? money(court.hourlyPriceCents) : 'Free'
+    if (s.status === 'taken') return isFuture(s.hour) ? 'Join waitlist' : 'Booked'
+    return 'Past'
+  }
+
+  function slotClass(s: Slot, isSelected: boolean): string {
+    if (isSelected) return 'selected'
+    if (s.mine) return 'mine'
+    if (waitingAt(s.hour)) return 'waiting'
+    return s.status
   }
 
   return (
@@ -129,16 +146,13 @@ export function BookCourt() {
         {slots.length === 0 ? <Empty>No slots for this court.</Empty> : (
           <div className="slots">
             {slots.map((s) => {
-              const isSelected = mode !== null && (s.hour === selected || (duration === 2 && s.hour === selected! + 1))
-              const mine = waitingAt(s.hour)
+              const isSelected = mode !== null && selected !== null && (s.hour === selected || (duration === 2 && s.hour === selected + 1))
               const clickable = s.status === 'available' || canWaitlist(s.hour)
-              const label = s.mine ? 'Your booking' : mine ? `Waitlist #${mine.position}`
-                : s.status === 'available' ? (court ? money(court.hourlyPriceCents) : 'Free')
-                : s.status === 'taken' ? (isFuture(s.hour) ? 'Join waitlist' : 'Booked') : 'Past'
+              const label = slotLabel(s)
               return (
                 <button
                   key={s.hour}
-                  className={`slot ${isSelected ? 'selected' : s.mine ? 'mine' : mine ? 'waiting' : s.status}`}
+                  className={`slot ${slotClass(s, isSelected)}`}
                   disabled={!clickable}
                   onClick={() => { setSelected(s.hour); setHours(1); setNotice(null) }}
                   aria-pressed={isSelected}
@@ -165,15 +179,15 @@ export function BookCourt() {
           <label>Duration
             <select value={duration} onChange={(e) => setHours(Number(e.target.value) as 1 | 2)}>
               <option value={1}>1 hour</option>
-              <option value={2} disabled={!canTwoHours}>2 hours{canTwoHours ? '' : ' (not possible)'}</option>
+              <option value={2} disabled={!nextHourUsable}>2 hours{nextHourUsable ? '' : ' (next hour not available)'}</option>
             </select>
           </label>
           <span className="spacer" />
           <span className="price">{money(court.hourlyPriceCents * duration)}</span>
           <button className="btn btn-secondary" onClick={() => setSelected(null)}>Clear</button>
           {mode === 'book'
-            ? <button className="btn btn-primary" onClick={book} disabled={busy}>{busy ? 'Booking…' : 'Confirm booking'}</button>
-            : <button className="btn btn-warning" onClick={joinWaitlist} disabled={busy}>{busy ? 'Joining…' : 'Join waitlist'}</button>}
+            ? <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? 'Booking…' : 'Confirm booking'}</button>
+            : <button className="btn btn-warning" onClick={submit} disabled={busy}>{busy ? 'Joining…' : 'Join waitlist'}</button>}
         </div>
       )}
       <Alert notice={notice} />

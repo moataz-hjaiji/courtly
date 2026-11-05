@@ -3,9 +3,11 @@
 ## Run it
 
 ```bash
-git clone <this repo> && cd courtly-procimo
+git clone https://github.com/moataz-hjaiji/courtly.git && cd courtly
 docker compose up
 ```
+
+The first run builds the images (about a minute); the app is ready when the `web` container is up.
 
 - App: http://localhost:8080
 - API (through the same origin): http://localhost:8080/api — e.g. `/api/health`

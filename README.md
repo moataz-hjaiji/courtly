@@ -219,8 +219,8 @@ Each endpoint was called **500 times** with a random court and a random day, aft
 How to read the columns:
 - **p50**: half of the requests were faster than this. This is the normal experience.
 - **p95**: 95 of 100 requests were faster than this.
-- **max**: the single slowest request. The 54 ms outlier is a one-off pause in Node (garbage collection), not the
-  database: Postgres itself needs 0.26 ms for that query.
+- **max**: the single slowest request. The 54 ms outlier is a one-off pause outside the database (Postgres itself
+  needs 0.26 ms for that query); 95% of requests finished within 3.2 ms.
 - **Time inside Postgres**: `Execution Time` from `EXPLAIN ANALYZE` on the exact SQL the endpoint sent.
 - **Indexes off**: the same SQL with `enable_indexscan` and `enable_bitmapscan` turned off, so Postgres has to read
   the whole table. This shows what the indexes are worth.

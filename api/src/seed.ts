@@ -37,6 +37,7 @@ export async function seed(pool: Pool): Promise<void> {
     return d.toISOString();
   };
   const plan: { court: typeof p1; user: number; offset: number; hour: number; hours: 1 | 2 }[] = [
+    { court: p2, user: bob!, offset: 0, hour: 12, hours: 2 }, // today, so the admin day view isn't empty
     { court: p1, user: alice!, offset: 1, hour: 18, hours: 2 },
     { court: p1, user: bob!, offset: 1, hour: 20, hours: 1 },
     { court: p2, user: bob!, offset: 1, hour: 10, hours: 1 },

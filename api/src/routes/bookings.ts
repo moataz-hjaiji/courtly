@@ -5,6 +5,7 @@ import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { findCourt } from './courts.js';
 import { atHour, dayParam, HOUR_MS } from '../time.js';
+import { publishAvailabilityChange } from '../events.js';
 
 export const CANCELLATION_CUTOFF_HOURS = 2;
 
@@ -44,6 +45,7 @@ bookingsRouter.post('/', async (req, res) => {
       [court.id, user.id, startAt, atHour(date, startHour + hours), court.hourlyPriceCents * hours],
     );
     const booking = await findBooking(rows[0]!.id);
+    publishAvailabilityChange(court.id, startAt);
     res.status(201).json(booking);
   } catch (err) {
     // 23P01 = exclusion_violation from bookings_no_overlap: someone holds an overlapping confirmed booking.
@@ -68,8 +70,8 @@ bookingsRouter.get('/mine', async (req, res) => {
 
 bookingsRouter.post('/:id/cancel', async (req, res) => {
   const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(req.params);
-  const { rows } = await pool.query<{ user_id: number; start_at: Date; status: string }>(
-    'SELECT user_id, start_at, status FROM bookings WHERE id = $1',
+  const { rows } = await pool.query<{ court_id: number; user_id: number; start_at: Date; status: string }>(
+    'SELECT court_id, user_id, start_at, status FROM bookings WHERE id = $1',
     [id],
   );
   const b = rows[0];
@@ -89,6 +91,7 @@ bookingsRouter.post('/:id/cancel', async (req, res) => {
     [id],
   );
   if (!updated.rowCount) throw new AppError(409, 'ALREADY_CANCELLED', 'Booking is already cancelled');
+  publishAvailabilityChange(b.court_id, b.start_at);
   res.json(await findBooking(id));
 });
 

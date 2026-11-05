@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { as, daysFromNow, insertBooking, pool, resetDb, tokens } from './helpers.js';
+import { as, daysFromNow, insertBooking, lockWaits, pool, resetDb, tokens } from './helpers.js';
 
 const alice = as(tokens.alice);
 const bob = as(tokens.bob);
@@ -92,10 +92,7 @@ describe('booking validation', () => {
       await admin.query('UPDATE courts SET is_active = false WHERE id = 1'); // holds the row lock, not committed yet
       const pending = book(alice, 10).then((r) => r); // .then starts the request
       // Wait until the booking is actually blocked on the court row lock.
-      await expect.poll(async () => {
-        const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()");
-        return rows[0].n;
-      }).toBe(1);
+      await expect.poll(lockWaits).toBe(1);
       await admin.query('COMMIT');
       const res = await pending;
       expect(res.status).toBe(404);

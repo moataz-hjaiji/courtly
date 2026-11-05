@@ -43,3 +43,11 @@ export async function insertBooking(userId: number, startAt: Date, hours = 1, co
   );
   return rows[0]!.id;
 }
+
+/** How many queries in the test database are currently blocked waiting for a lock. */
+export async function lockWaits(): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+  );
+  return rows[0]!.n;
+}

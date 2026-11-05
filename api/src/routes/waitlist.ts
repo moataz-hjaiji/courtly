@@ -34,9 +34,12 @@ waitlistRouter.post('/', async (req, res) => {
   const id = await withTx(async (tx) => {
     const court = await findCourt(courtId, false, tx);
     checkSlotRules(court, startHour, hours, startAt);
+    // FOR SHARE locks the bookings we're waiting behind. A cancellation in progress makes us wait and then
+    // we see the slot is free; a cancellation that starts after us waits for us and then promotes this entry.
     const { rows: blocking } = await tx.query<{ user_id: number }>(
       `SELECT user_id FROM bookings
-       WHERE court_id = $1 AND status = 'confirmed' AND tstzrange(start_at, end_at, '[)') && tstzrange($2, $3, '[)')`,
+       WHERE court_id = $1 AND status = 'confirmed' AND tstzrange(start_at, end_at, '[)') && tstzrange($2, $3, '[)')
+       FOR SHARE`,
       [courtId, startAt, endAt],
     );
     if (blocking.length === 0) throw new AppError(409, 'SLOT_AVAILABLE', 'This slot is free — book it directly');

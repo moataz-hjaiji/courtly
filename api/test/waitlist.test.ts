@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, daysFromNow, pool, resetDb, tokens } from './helpers.js';
+import { as, daysFromNow, lockWaits, pool, resetDb, tokens } from './helpers.js';
 
 // users: 1 admin, 2 alice, 3 bob (admins can book like anyone). Court 1 open 8-23.
 const admin = as(tokens.admin);
@@ -33,6 +33,23 @@ describe('joining the waitlist', () => {
     const res = await who.post('/waitlist', slot(10));
     expect(res.status).toBe(status);
     expect(res.body.error.code).toBe(code);
+  });
+
+  it('does not queue someone behind a booking that is being cancelled at that moment', async () => {
+    const booking = await alice.post('/bookings', slot(10));
+    const cancel = await pool.connect();
+    try {
+      await cancel.query('BEGIN');
+      await cancel.query("UPDATE bookings SET status = 'cancelled' WHERE id = $1", [booking.body.id]); // not committed yet
+      const join = bob.post('/waitlist', slot(10)).then((r) => r); // .then starts the request
+      await expect.poll(lockWaits).toBe(1); // the join is waiting for the cancellation
+      await cancel.query('COMMIT');
+      const res = await join;
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('SLOT_AVAILABLE');
+    } finally {
+      cancel.release();
+    }
   });
 
   it('applies the same opening-hours and past rules as booking', async () => {

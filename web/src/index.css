@@ -123,7 +123,7 @@ input[type='number'] { width: 6.5rem; }
 .summary .price { font-size: 1.375rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* Tables */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; position: relative; } /* relative: keeps .sr-only labels inside the scroll box */
 table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--subtle); font-weight: 600; background: #f8fafc; }
 th, td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -150,6 +150,8 @@ td.actions .row { justify-content: flex-end; gap: 0.5rem; }
 }
 @media (max-width: 640px) {
   .container { padding: 1.25rem 1rem 3rem; }
+  .field-grid { grid-template-columns: 1fr; }
+  .daypicker input { flex: 1; min-width: 0; }
   .user .name { display: none; }
 }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

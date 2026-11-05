@@ -146,6 +146,12 @@ describe('cancellation window', () => {
     expect((await bob.post(`/bookings/${id}/cancel`)).status).toBe(404);
   });
 
+  it('cancels only once when the same booking is cancelled twice at the same instant', async () => {
+    const id = await insertBooking(2, start);
+    const codes = (await Promise.all([alice.post(`/bookings/${id}/cancel`), alice.post(`/bookings/${id}/cancel`)])).map((r) => r.status);
+    expect(codes.sort()).toEqual([200, 409]);
+  });
+
   it('rejects cancelling twice', async () => {
     const id = await insertBooking(2, start);
     await alice.post(`/bookings/${id}/cancel`);

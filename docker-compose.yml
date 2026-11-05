@@ -16,5 +16,40 @@ services:
       timeout: 3s
       retries: 30
 
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgres://courtly:courtly@db:5432/courtly
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      PORT: "3000"
+    # not published: the browser reaches the API through nginx at :8080/api
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api-test:
+    profiles: ["test"]
+    build:
+      context: ./api
+      target: test
+    environment:
+      TEST_DATABASE_URL: postgres://courtly:courtly@db:5432/courtly_test
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   db-data:

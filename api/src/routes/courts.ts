@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
-import { pool } from '../db.js';
+import { pool, withTx } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
 import { atHour, dayParam, HOUR_MS } from '../time.js';
+import { publishAvailabilityChange } from '../events.js';
 
 export const courtsRouter = Router();
 courtsRouter.use(requireAuth);
@@ -56,8 +57,15 @@ function mapWriteError(err: unknown): never {
 }
 
 courtsRouter.get('/', async (req, res) => {
-  const all = currentUser(req).role === 'admin';
-  const { rows } = await pool.query(`SELECT ${COURT_COLUMNS} FROM courts ${all ? '' : 'WHERE is_active'} ORDER BY name`);
+  const admin = currentUser(req).role === 'admin';
+  // Admins also get how many future bookings each court has, so the UI can warn before deactivating.
+  const { rows } = await pool.query(
+    admin
+      ? `SELECT ${COURT_COLUMNS}, (SELECT count(*)::int FROM bookings b
+           WHERE b.court_id = courts.id AND b.status = 'confirmed' AND b.start_at > now()) AS "futureBookings"
+         FROM courts ORDER BY name`
+      : `SELECT ${COURT_COLUMNS} FROM courts WHERE is_active ORDER BY name`,
+  );
   res.json(rows);
 });
 
@@ -106,11 +114,17 @@ courtsRouter.post('/', requireAdmin, async (req, res) => {
 });
 
 // Deactivation is PATCH { isActive: false }: there is no DELETE, so booking history is never lost.
+/**
+ * Edit a court. Deactivating ({ isActive: false }) also cancels its future bookings and waitlist entries in the
+ * same transaction, so nobody keeps a reservation on a closed court. Past bookings stay as history.
+ */
 courtsRouter.patch('/:id', requireAdmin, async (req, res) => {
   const { id } = idParam.parse(req.params);
   const c = updateBody.parse(req.body);
-  const { rows } = await pool
-    .query(
+  const result = await withTx(async (tx) => {
+    // The UPDATE locks the court row: a booking in flight (which holds it FOR SHARE) finishes first,
+    // and the cancel below then sees it; bookings that start after this see the court as inactive.
+    const { rows } = await tx.query<Court>(
       `UPDATE courts SET
          name = COALESCE($2, name), sport = COALESCE($3, sport),
          hourly_price_cents = COALESCE($4, hourly_price_cents),
@@ -118,8 +132,23 @@ courtsRouter.patch('/:id', requireAdmin, async (req, res) => {
          is_active = COALESCE($7, is_active)
        WHERE id = $1 RETURNING ${COURT_COLUMNS}`,
       [id, c.name, c.sport, c.hourlyPriceCents, c.openHour, c.closeHour, c.isActive],
-    )
-    .catch(mapWriteError);
-  if (!rows[0]) throw new AppError(404, 'COURT_NOT_FOUND', 'Court not found');
-  res.json(rows[0]);
+    );
+    const court = rows[0];
+    if (!court) throw new AppError(404, 'COURT_NOT_FOUND', 'Court not found');
+    if (court.isActive) return { court, cancelledDays: [] as Date[] };
+
+    const cancelled = await tx.query<{ start_at: Date }>(
+      `UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancel_reason = 'court_deactivated'
+       WHERE court_id = $1 AND status = 'confirmed' AND start_at > now()
+       RETURNING start_at`,
+      [id],
+    );
+    await tx.query("UPDATE waitlist_entries SET status = 'cancelled' WHERE court_id = $1 AND status = 'waiting'", [id]);
+    return { court, cancelledDays: cancelled.rows.map((r) => r.start_at) };
+  }).catch(mapWriteError);
+
+  // One live update per affected day, so open booking pages refresh.
+  const days = new Set(result.cancelledDays.map((d) => d.toISOString().slice(0, 10)));
+  for (const day of days) publishAvailabilityChange(id, new Date(`${day}T00:00:00Z`));
+  res.json({ ...result.court, cancelledBookings: result.cancelledDays.length });
 });

@@ -17,7 +17,7 @@ bookingsRouter.use(requireAuth);
 
 export const BOOKING_COLUMNS = `b.id, b.court_id AS "courtId", c.name AS "courtName", c.sport, b.user_id AS "userId",
   b.start_at AS "startAt", b.end_at AS "endAt", b.price_cents AS "priceCents", b.status,
-  b.created_at AS "createdAt", b.cancelled_at AS "cancelledAt"`;
+  b.created_at AS "createdAt", b.cancelled_at AS "cancelledAt", b.cancel_reason AS "cancelReason"`;
 
 
 bookingsRouter.post('/', async (req, res) => {

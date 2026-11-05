@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import { app, as, daysFromNow, insertBooking, pool, resetDb, tokens } from './helpers.js';
+import { app, as, daysFromNow, insertBooking, lockWaits, pool, resetDb, tokens } from './helpers.js';
 
 beforeEach(resetDb);
 afterAll(() => pool.end());
@@ -46,6 +46,63 @@ describe('admin courts', () => {
     const bad = await admin.post('/courts', { name: 'Bad', sport: 'padel', hourlyPriceCents: 3500, openHour: 20, closeHour: 8 });
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('INVALID_OPENING_HOURS');
+  });
+
+  it('deactivating cancels future bookings and waitlist entries, but keeps past and running ones', async () => {
+    const HOUR = 60 * 60 * 1000;
+    const thisHour = new Date(Math.floor(Date.now() / HOUR) * HOUR);
+    const past = await insertBooking(2, new Date(`${daysFromNow(-1)}T10:00:00Z`));
+    const running = await insertBooking(2, thisHour); // started this hour, still going
+    const future = await insertBooking(3, new Date(`${daysFromNow(2)}T10:00:00Z`));
+    await as(tokens.alice).post('/waitlist', { courtId: 1, date: daysFromNow(2), startHour: 10, hours: 1 }).expect(201);
+
+    const res = await admin.patch('/courts/1', { isActive: false });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ isActive: false, cancelledBookings: 1 });
+
+    const status = async (id: number) =>
+      (await pool.query('SELECT status, cancel_reason FROM bookings WHERE id = $1', [id])).rows[0];
+    expect(await status(past)).toEqual({ status: 'confirmed', cancel_reason: null });
+    expect(await status(running)).toEqual({ status: 'confirmed', cancel_reason: null });
+    expect(await status(future)).toEqual({ status: 'cancelled', cancel_reason: 'court_deactivated' });
+    const waitlist = (await as(tokens.alice).get('/waitlist/mine')).body;
+    expect(waitlist[0].status).toBe('cancelled');
+    // ...and nobody was promoted into the freed slot of a closed court
+    expect((await pool.query("SELECT count(*)::int AS n FROM bookings WHERE user_id = 2 AND start_at > now() AND status = 'confirmed'")).rows[0].n).toBe(0);
+  });
+
+  it('shows players why their booking was cancelled', async () => {
+    await insertBooking(3, new Date(`${daysFromNow(2)}T10:00:00Z`));
+    await admin.patch('/courts/1', { isActive: false }).expect(200);
+    const mine = (await as(tokens.bob).get('/bookings/mine')).body;
+    expect(mine.upcoming[0]).toMatchObject({ status: 'cancelled', cancelReason: 'court_deactivated' });
+  });
+
+  it('tells admins how many future bookings each court has', async () => {
+    await insertBooking(2, new Date(`${daysFromNow(2)}T10:00:00Z`));
+    await insertBooking(2, new Date(`${daysFromNow(-2)}T10:00:00Z`)); // past: not counted
+    const courts = (await admin.get('/courts')).body;
+    expect(courts.find((c: { id: number }) => c.id === 1).futureBookings).toBe(1);
+    expect((await as(tokens.alice).get('/courts')).body[0].futureBookings).toBeUndefined();
+  });
+
+  it('also cancels a booking that was being made at the moment of deactivation', async () => {
+    const booker = await pool.connect();
+    try {
+      // Same locking as POST /bookings: hold the court FOR SHARE and insert, but don't commit yet.
+      await booker.query('BEGIN');
+      await booker.query('SELECT 1 FROM courts WHERE id = 1 FOR SHARE');
+      await booker.query(
+        "INSERT INTO bookings (court_id, user_id, start_at, end_at, price_cents) VALUES (1, 2, $1, $1::timestamptz + interval '1 hour', 3000)",
+        [new Date(`${daysFromNow(3)}T10:00:00Z`)],
+      );
+      const deactivate = admin.patch('/courts/1', { isActive: false }).then((r) => r);
+      await expect.poll(lockWaits).toBe(1); // the deactivation waits for the booking
+      await booker.query('COMMIT');
+      expect((await deactivate).body.cancelledBookings).toBe(1);
+    } finally {
+      booker.release();
+    }
   });
 
   it('deactivates a court without deleting its bookings', async () => {

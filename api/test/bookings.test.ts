@@ -102,9 +102,14 @@ describe('booking validation', () => {
     }
   });
 
-  it('rejects bookings on an inactive court', async () => {
-    const res = await book(alice, 10, 1, 2);
-    expect(res.status).toBe(404);
+  it('rejects bookings on an inactive court, for admins too', async () => {
+    for (const who of [alice, as(tokens.admin)]) {
+      const res = await book(who, 10, 1, 2);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('COURT_NOT_FOUND');
+    }
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM bookings WHERE court_id = 2');
+    expect(rows[0].n).toBe(0);
   });
 
   it('snapshots the price so later price changes do not alter it', async () => {

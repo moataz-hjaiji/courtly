@@ -52,6 +52,12 @@ describe('joining the waitlist', () => {
     }
   });
 
+  it('rejects joining the waitlist of an inactive court', async () => {
+    const res = await bob.post('/waitlist', slot(10, 1, 2)); // court 2 is inactive in the fixtures
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('COURT_NOT_FOUND');
+  });
+
   it('applies the same opening-hours and past rules as booking', async () => {
     expect((await bob.post('/waitlist', slot(22, 2))).body.error.code).toBe('OUTSIDE_OPENING_HOURS');
     expect((await bob.post('/waitlist', slot(10, 1, 1, daysFromNow(-1)))).body.error.code).toBe('BOOKING_IN_PAST');

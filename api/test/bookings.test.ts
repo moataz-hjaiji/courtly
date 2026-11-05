@@ -13,11 +13,16 @@ afterAll(() => pool.end());
 
 describe('double-booking prevention', () => {
   it('lets exactly one of many simultaneous requests for the same slot win', async () => {
-    const results = await Promise.all(Array.from({ length: 20 }, (_, i) => book(i % 2 ? alice : bob, 10)));
+    const users = Array.from({ length: 20 }, (_, i) => (i % 2 ? 2 : 3)); // alice = 2, bob = 3
+    const results = await Promise.all(users.map((u) => book(u === 2 ? alice : bob, 10)));
     const codes = results.map((r) => r.status).sort();
     expect(codes.filter((c) => c === 201)).toHaveLength(1);
     expect(codes.filter((c) => c === 409)).toHaveLength(19);
-    expect(results.find((r) => r.status === 409)!.body.error.code).toBe('SLOT_TAKEN');
+    // Losers learn who holds the slot: the winner's other requests say ALREADY_BOOKED, everyone else SLOT_TAKEN.
+    const winner = users[results.findIndex((r) => r.status === 201)];
+    results.forEach((r, i) => {
+      if (r.status === 409) expect(r.body.error.code).toBe(users[i] === winner ? 'ALREADY_BOOKED' : 'SLOT_TAKEN');
+    });
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM bookings WHERE status = 'confirmed'");
     expect(rows[0].n).toBe(1);
   });
@@ -25,6 +30,15 @@ describe('double-booking prevention', () => {
   it('rejects a 1h booking inside an existing 2h booking, and the reverse, even concurrently', async () => {
     const [twoHours, oneHour] = await Promise.all([book(alice, 14, 2), book(bob, 15, 1)]);
     expect([twoHours.status, oneHour.status].sort()).toEqual([201, 409]);
+  });
+
+  it('says so when the overlap is your own booking, not someone else\'s', async () => {
+    await book(alice, 10, 2).expect(201);
+    const mine = await book(alice, 11);
+    expect(mine.status).toBe(409);
+    expect(mine.body.error.code).toBe('ALREADY_BOOKED');
+    const theirs = await book(bob, 11);
+    expect(theirs.body.error.code).toBe('SLOT_TAKEN');
   });
 
   it('allows back-to-back bookings (end is exclusive)', async () => {

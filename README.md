@@ -27,7 +27,7 @@ All times are UTC.
 ### Tests
 
 ```bash
-docker compose --profile test run --rm --build api-test   # backend: 48 tests against a real Postgres
+docker compose --profile test run --rm --build api-test   # backend: 49 tests against a real Postgres
 docker compose --profile test run --rm --build web-test   # frontend: 65 tests in jsdom
 ```
 

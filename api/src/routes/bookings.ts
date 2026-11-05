@@ -37,10 +37,18 @@ bookingsRouter.post('/', async (req, res) => {
     );
     // Read back inside the transaction: once committed, nothing after it can fail and report a saved booking as an error.
     return findBooking(rows[0]!.id, tx);
-  }).catch((err) => {
-    // 23P01 = exclusion_violation from bookings_no_overlap: someone holds an overlapping confirmed booking.
-    if (pgCode(err) === '23P01') throw new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
-    throw err;
+  }).catch(async (err) => {
+    // 23P01 = exclusion_violation from bookings_no_overlap: an overlapping confirmed booking exists.
+    if (pgCode(err) !== '23P01') throw err;
+    // Only to pick the right message: is the overlapping booking the caller's own?
+    const own = await pool.query(
+      `SELECT 1 FROM bookings WHERE court_id = $1 AND user_id = $2 AND status = 'confirmed'
+         AND tstzrange(start_at, end_at, '[)') && tstzrange($3, $4, '[)')`,
+      [courtId, user.id, startAt, atHour(date, startHour + hours)],
+    );
+    throw own.rowCount
+      ? new AppError(409, 'ALREADY_BOOKED', 'You already have a booking on this court at this time')
+      : new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
   });
   publishAvailabilityChange(courtId, startAt);
   res.status(201).json(booking);

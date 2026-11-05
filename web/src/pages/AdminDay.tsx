@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
-import { api, dayLabel, errorText, hhmm, money, today, type Booking } from '../api'
-import { Alert, Badge, DayPicker, Empty, PageHeader, statusTone, type Notice } from '../ui'
+import { api } from '../api/client'
+import type { Booking } from '../api/types'
+import { dayLabel, errorText, hhmm, money, today } from '../utils/format'
+import { Alert, type Notice } from '../components/Alert'
+import { Badge, statusTone } from '../components/Badge'
+import { DayPicker } from '../components/DayPicker'
+import { Empty } from '../components/Empty'
+import { PageHeader } from '../components/PageHeader'
 
 export function AdminDay() {
   const [date, setDate] = useState(today())

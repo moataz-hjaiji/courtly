@@ -1,6 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { api, auth, errorText, type User } from '../api'
-import { Alert, Logo, type Notice } from '../ui'
+import { api, auth } from '../api/client'
+import type { User } from '../api/types'
+import { errorText } from '../utils/format'
+import { Alert, type Notice } from '../components/Alert'
+import { Logo } from '../components/Logo'
 
 const DEMO = [
   { email: 'alice@courtly.test', label: 'Alice (user)' },

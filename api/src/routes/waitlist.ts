@@ -84,7 +84,7 @@ waitlistRouter.post('/:id/leave', async (req, res) => {
  * promote the same entry, and a failed attempt's ROLLBACK TO SAVEPOINT releases the lock straight away,
  * so it can't hide the entry from a concurrent cancellation that could have promoted it.
  */
-export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStart: Date, freedEnd: Date): Promise<number[]> {
+export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStart: Date, freedEnd: Date): Promise<void> {
   const { rows: candidates } = await tx.query<{
     id: number; user_id: number; start_at: Date; end_at: Date; hourly_price_cents: number; open_hour: number; close_hour: number;
   }>(
@@ -95,7 +95,6 @@ export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStar
      ORDER BY w.created_at, w.id`,
     [courtId, freedStart, freedEnd],
   );
-  const promoted: number[] = [];
   for (const w of candidates) {
     const hours = (w.end_at.getTime() - w.start_at.getTime()) / HOUR_MS;
     // The court's hours may have changed since this person joined: only promote into today's opening hours.
@@ -117,11 +116,9 @@ export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStar
       );
       await tx.query("UPDATE waitlist_entries SET status = 'promoted', booking_id = $2 WHERE id = $1", [w.id, rows[0]!.id]);
       await tx.query('RELEASE SAVEPOINT promote');
-      promoted.push(rows[0]!.id);
     } catch (err) {
       if (pgCode(err) !== '23P01') throw err;
       await tx.query('ROLLBACK TO SAVEPOINT promote'); // still overlaps another booking: leave it waiting
     }
   }
-  return promoted;
 }

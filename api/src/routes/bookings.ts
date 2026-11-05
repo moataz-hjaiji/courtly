@@ -8,7 +8,7 @@ import { findCourt } from './courts.js';
 import { atHour, dayParam, HOUR_MS } from '../time.js';
 import { publishAvailabilityChange } from '../events.js';
 
-export const CANCELLATION_CUTOFF_HOURS = 2;
+const CANCELLATION_CUTOFF_HOURS = 2;
 
 export const bookingsRouter = Router();
 bookingsRouter.use(requireAuth);

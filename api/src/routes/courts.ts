@@ -9,7 +9,7 @@ import { atHour, dayParam, HOUR_MS } from '../time.js';
 export const courtsRouter = Router();
 courtsRouter.use(requireAuth);
 
-export const COURT_COLUMNS = `id, name, sport, hourly_price_cents AS "hourlyPriceCents",
+const COURT_COLUMNS = `id, name, sport, hourly_price_cents AS "hourlyPriceCents",
   open_hour AS "openHour", close_hour AS "closeHour", is_active AS "isActive"`;
 
 export interface Court {
@@ -66,7 +66,7 @@ courtsRouter.get('/:id', async (req, res) => {
   res.json(await findCourt(id, currentUser(req).role === 'admin'));
 });
 
-export type SlotStatus = 'available' | 'taken' | 'past';
+type SlotStatus = 'available' | 'taken' | 'past';
 
 /** One-hour slots within opening hours, each marked available / taken (confirmed booking) / past. */
 courtsRouter.get('/:id/availability', async (req, res) => {

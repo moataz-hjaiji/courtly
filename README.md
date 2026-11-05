@@ -27,11 +27,33 @@ All times are UTC.
 ### Tests
 
 ```bash
-docker compose --profile test run --rm api-test
+docker compose --profile test run --rm api-test   # backend: 42 tests against a real Postgres
+docker compose --profile test run --rm web-test   # frontend: 54 tests in jsdom
 ```
 
-Runs the API test suite (Vitest + supertest) against a real Postgres database (`courtly_test`).
-Locally: `docker compose up -d db && cd api && npm ci && npm test`.
+- **Backend** (Vitest + supertest) runs against a real Postgres database (`courtly_test`), because the
+  double-booking and race tests only prove something against the real constraint and locks.
+  Locally: `docker compose up -d db && cd api && npm ci && npm test`.
+- **Frontend** (Vitest + Testing Library + jsdom) renders each page against a small fake API
+  ([web/src/test/fakes.ts](web/src/test/fakes.ts)) with a fixed clock, and clicks through it like a user: booking
+  1h/2h, joining and leaving the waitlist, live updates, cancel errors, admin revenue, court forms, role-based tabs.
+  The slot-grid rules are pure functions ([web/src/utils/grid.ts](web/src/utils/grid.ts)) with their own unit tests.
+  Locally: `cd web && npm ci && npm test`.
+
+### Frontend structure
+
+```
+web/src/
+  api/         client.ts (fetch wrapper, token, ApiError) · types.ts (API shapes)
+  utils/       format.ts (money, hours, UTC dates) · grid.ts (pure rules: book / waitlist / 2h / labels)
+  hooks/       useAvailability.ts (slots + my waitlist, refreshed by the live event stream)
+  components/  Logo, Badge, Alert, PageHeader, Empty, DayPicker, SlotGrid, BookingSummary,
+               BookingTable, WaitlistTable, CourtForm
+  pages/       Login, BookCourt, MyBookings, AdminCourts, AdminDay (state + layout only)
+  test/        setup.ts (fixed clock, fake EventSource) · fakes.ts (fake API + test data)
+```
+
+Tests sit next to the code they test (`grid.test.ts` beside `grid.ts`).
 
 ### Without Docker for the apps (dev mode)
 
@@ -293,8 +315,8 @@ Admin day-view query plan  (/admin/bookings?date=2026-11-05)
    limiting on `/auth/login`, and refuse to start in production without a real `JWT_SECRET`.
 4. **Real-time across instances** with Postgres `LISTEN/NOTIFY`, and on the booking page a "live" indicator that
    reloads after a reconnect.
-5. **Frontend tests.** Vitest + Testing Library for the booking flow (select slot → 2h disabled when next slot is
-   taken → 409 message), plus one Playwright end-to-end test against `docker compose up`.
+5. **End-to-end test.** One Playwright run against `docker compose up` (login → book → cancel → waitlist promotion
+   across two browsers), on top of the unit and page tests.
 6. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
    choose to be asked first (with a time limit) instead of being booked automatically.
 7. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel

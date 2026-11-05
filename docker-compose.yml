@@ -51,5 +51,11 @@ services:
       db:
         condition: service_healthy
 
+  web-test:
+    profiles: ["test"]
+    build:
+      context: ./web
+      target: test
+
 volumes:
   db-data:

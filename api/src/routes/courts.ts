@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
+import { atHour, dayParam, HOUR_MS } from '../time.js';
 
 export const courtsRouter = Router();
 courtsRouter.use(requireAuth);
@@ -56,6 +57,32 @@ courtsRouter.get('/', async (req, res) => {
 courtsRouter.get('/:id', async (req, res) => {
   const { id } = idParam.parse(req.params);
   res.json(await findCourt(id, currentUser(req).role === 'admin'));
+});
+
+export type SlotStatus = 'available' | 'taken' | 'past';
+
+/** One-hour slots within opening hours, each marked available / taken (confirmed booking) / past. */
+courtsRouter.get('/:id/availability', async (req, res) => {
+  const { id } = idParam.parse(req.params);
+  const { date } = z.object({ date: dayParam }).parse(req.query);
+  const court = await findCourt(id, currentUser(req).role === 'admin');
+  const dayStart = atHour(date, court.openHour);
+  const dayEnd = atHour(date, court.closeHour);
+  // && on tstzrange uses the GiST index created by the exclusion constraint.
+  const { rows } = await pool.query<{ start_at: Date; end_at: Date }>(
+    `SELECT start_at, end_at FROM bookings
+     WHERE court_id = $1 AND status = 'confirmed' AND tstzrange(start_at, end_at, '[)') && tstzrange($2, $3, '[)')`,
+    [id, dayStart, dayEnd],
+  );
+  const now = Date.now();
+  const slots = [];
+  for (let h = court.openHour; h < court.closeHour; h++) {
+    const start = atHour(date, h).getTime();
+    const taken = rows.some((b) => b.start_at.getTime() < start + HOUR_MS && b.end_at.getTime() > start);
+    const status: SlotStatus = taken ? 'taken' : start <= now ? 'past' : 'available';
+    slots.push({ hour: h, startAt: new Date(start).toISOString(), status });
+  }
+  res.json({ court, date: req.query.date, slots });
 });
 
 courtsRouter.post('/', requireAdmin, async (req, res) => {

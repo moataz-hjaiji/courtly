@@ -133,8 +133,8 @@ Two related races are closed the same way, by letting Postgres order things:
 
 ## Bonus features
 
-The brief asks candidates to pick **at most one** bonus. This reference solution implements two, real-time
-availability and the waitlist, so students can study both. In a real submission, pick one and finish it well.
+The brief asks candidates to pick **at most one** bonus. This reference solution implements all three (real-time
+availability, the waitlist and the performance note) so students can study each one. In a real submission, pick one and finish it well.
 
 ### Real-time availability
 
@@ -173,6 +173,33 @@ How it is built ([api/migrations/002_waitlist.sql](api/migrations/002_waitlist.s
 - `position` is computed on read (how many waiting entries on that court overlap yours and are older), so there is
   no stored order to keep in sync.
 
+### Performance note
+
+```bash
+docker compose --profile test run --rm api-test npm run perf
+```
+
+[api/test/perf.ts](api/test/perf.ts) fills a separate `courtly_perf` database (your demo data is untouched) with
+**131,000 bookings**: 20 courts × 731 days (a year back, a year ahead) × 15 hours, 60% of slots booked, 10% of those
+cancelled. It then calls the real endpoints 500 times each, with random courts and days, and runs `EXPLAIN ANALYZE` on
+the exact SQL they sent.
+
+Results (Docker on an Apple M3 Pro laptop; your numbers will vary a little):
+
+| Endpoint | p50 | p95 | DB execution time | Same query without indexes |
+|---|---|---|---|---|
+| `GET /courts/:id/availability` | 0.7 ms | 1.5 ms | 0.03 ms | 17 ms |
+| `GET /admin/bookings?date=` (day view, ~180 rows) | 2.0 ms | 3.2 ms | 0.26 ms | 6.5 ms |
+
+Latency is end to end through the HTTP server, including JWT check, validation and JSON. Why it stays fast:
+- **Availability** reads one court for one day. It uses the GiST index that the `bookings_no_overlap` constraint
+  already created (`Bitmap Index Scan on bookings_no_overlap`), so the guarantee against double bookings doubles as
+  the index for this query. It touches about 10 rows, not 131,000.
+- **Admin day view** uses `bookings_start_idx` on `start_at` for the day's range, then joins courts and users by
+  primary key.
+- Both cost grows with *bookings per day*, not with total history. Without indexes Postgres has to scan the whole
+  table, which is already 25–600× slower at this size and keeps growing with every booking.
+
 ## What I would do next
 
 1. **Facility time zone.** Everything runs in UTC now. Add a `timezone` setting and convert opening hours and "today"
@@ -185,9 +212,7 @@ How it is built ([api/migrations/002_waitlist.sql](api/migrations/002_waitlist.s
    reloads after a reconnect.
 5. **Frontend tests.** Vitest + Testing Library for the booking flow (select slot → 2h disabled when next slot is
    taken → 409 message), plus one Playwright end-to-end test against `docker compose up`.
-6. **Performance proof.** Seed 10k+ bookings and record `EXPLAIN ANALYZE` for the availability and admin day queries.
-   The GiST index from the constraint should serve availability, and `bookings_start_idx` the day view.
-7. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
+6. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
    choose to be asked first (with a time limit) instead of being booked automatically.
-8. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
+7. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
    with a reason.

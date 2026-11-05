@@ -68,6 +68,9 @@ describe('opening hours', () => {
     expect(res.body.slots.map((s: { hour: number }) => s.hour)).toEqual([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
     const taken = res.body.slots.filter((s: { status: string }) => s.status === 'taken').map((s: { hour: number }) => s.hour);
     expect(taken).toEqual([10, 11]);
+    expect(res.body.slots.filter((s: { mine: boolean }) => s.mine).map((s: { hour: number }) => s.hour)).toEqual([10, 11]);
+    const bobView = await bob.get(`/courts/1/availability?date=${date}`);
+    expect(bobView.body.slots.some((s: { mine: boolean }) => s.mine)).toBe(false);
   });
 });
 

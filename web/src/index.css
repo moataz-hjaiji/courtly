@@ -153,3 +153,14 @@ td.actions .row { justify-content: flex-end; gap: 0.5rem; }
   .user .name { display: none; }
 }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Waitlist */
+.slot.taken:not(:disabled):hover { border-color: #f87171; background: #fee2e2; }
+.slot.waiting { background: var(--warning-soft); border-color: #fcd34d; color: var(--warning); }
+.dot.waiting { background: var(--warning-soft); border-color: #fcd34d; }
+.summary-waitlist { border-color: #fcd34d; background: linear-gradient(0deg, var(--warning-soft), var(--surface)); }
+.btn-warning { background: #b45309; color: #fff; } /* amber-700: 5:1 with white */
+.btn-warning:hover { background: var(--warning); }
+.slot.mine { background: var(--info-soft); border-color: #93c5fd; color: var(--info); }
+.dot.mine { background: var(--info-soft); border-color: #93c5fd; }
+.summary > .stack { flex: 1 1 260px; }

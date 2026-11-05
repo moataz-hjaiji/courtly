@@ -76,8 +76,8 @@ courtsRouter.get('/:id/availability', async (req, res) => {
   const dayStart = atHour(date, court.openHour);
   const dayEnd = atHour(date, court.closeHour);
   // && on tstzrange uses the GiST index created by the exclusion constraint.
-  const { rows } = await pool.query<{ start_at: Date; end_at: Date }>(
-    `SELECT start_at, end_at FROM bookings
+  const { rows } = await pool.query<{ start_at: Date; end_at: Date; user_id: number }>(
+    `SELECT start_at, end_at, user_id FROM bookings
      WHERE court_id = $1 AND status = 'confirmed' AND tstzrange(start_at, end_at, '[)') && tstzrange($2, $3, '[)')`,
     [id, dayStart, dayEnd],
   );
@@ -85,9 +85,10 @@ courtsRouter.get('/:id/availability', async (req, res) => {
   const slots = [];
   for (let h = court.openHour; h < court.closeHour; h++) {
     const start = atHour(date, h).getTime();
-    const taken = rows.some((b) => b.start_at.getTime() < start + HOUR_MS && b.end_at.getTime() > start);
-    const status: SlotStatus = taken ? 'taken' : start <= now ? 'past' : 'available';
-    slots.push({ hour: h, startAt: new Date(start).toISOString(), status });
+    const booking = rows.find((b) => b.start_at.getTime() < start + HOUR_MS && b.end_at.getTime() > start);
+    const status: SlotStatus = booking ? 'taken' : start <= now ? 'past' : 'available';
+    // mine: only tells callers about their own bookings, never who else holds a slot
+    slots.push({ hour: h, startAt: new Date(start).toISOString(), status, mine: booking?.user_id === currentUser(req).id });
   }
   res.json({ court, date: req.query.date, slots });
 });

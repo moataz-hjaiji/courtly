@@ -5,11 +5,16 @@ export interface Court {
   openHour: number; closeHour: number; isActive: boolean
 }
 export type SlotStatus = 'available' | 'taken' | 'past'
-export interface Slot { hour: number; startAt: string; status: SlotStatus }
+export interface Slot { hour: number; startAt: string; status: SlotStatus; mine: boolean }
 export interface Booking {
   id: number; courtId: number; courtName: string; sport: string; userId: number
   startAt: string; endAt: string; priceCents: number; status: 'confirmed' | 'cancelled'
   userName?: string; userEmail?: string
+}
+
+export interface WaitlistEntry {
+  id: number; courtId: number; courtName: string; sport: string; startAt: string; endAt: string
+  status: 'waiting' | 'promoted' | 'left'; bookingId: number | null; position: number | null
 }
 
 export class ApiError extends Error {

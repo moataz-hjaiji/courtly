@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
-import { pool } from '../db.js';
+import { pool, withTx } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
-import { findCourt } from './courts.js';
+import { findCourt, type Court } from './courts.js';
 import { atHour, dayParam, HOUR_MS } from '../time.js';
 import { publishAvailabilityChange } from '../events.js';
 
@@ -17,51 +17,48 @@ export const BOOKING_COLUMNS = `b.id, b.court_id AS "courtId", c.name AS "courtN
   b.start_at AS "startAt", b.end_at AS "endAt", b.price_cents AS "priceCents", b.status,
   b.created_at AS "createdAt", b.cancelled_at AS "cancelledAt"`;
 
-const createBody = z.object({
+/** Body for booking a slot or joining its waitlist. */
+export const slotBody = z.object({
   courtId: z.number().int().positive(),
   date: dayParam,
   startHour: z.number().int().min(0).max(23),
   hours: z.union([z.literal(1), z.literal(2)]),
 });
 
+/** Rules shared by booking and joining the waitlist. Throws a 422 AppError when a rule is broken. */
+export function checkSlotRules(court: Court, startHour: number, hours: number, startAt: Date): void {
+  if (startHour < court.openHour || startHour + hours > court.closeHour) {
+    throw new AppError(
+      422,
+      'OUTSIDE_OPENING_HOURS',
+      `${court.name} is open ${court.openHour}:00–${court.closeHour}:00; a ${hours}h booking at ${startHour}:00 does not fit`,
+    );
+  }
+  if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
+}
+
 bookingsRouter.post('/', async (req, res) => {
   const user = currentUser(req);
-  const { courtId, date, startHour, hours } = createBody.parse(req.body);
+  const { courtId, date, startHour, hours } = slotBody.parse(req.body);
   const startAt = atHour(date, startHour);
 
   // The court row is locked FOR SHARE until COMMIT, so an admin deactivating it or changing its hours
   // either finishes first (and we see the new values) or waits until this booking is in.
-  const tx = await pool.connect();
-  let booking: unknown;
-  try {
-    await tx.query('BEGIN');
+  const booking = await withTx(async (tx) => {
     const court = await findCourt(courtId, false, tx);
-    if (startHour < court.openHour || startHour + hours > court.closeHour) {
-      throw new AppError(
-        422,
-        'OUTSIDE_OPENING_HOURS',
-        `${court.name} is open ${court.openHour}:00–${court.closeHour}:00; a ${hours}h booking at ${startHour}:00 does not fit`,
-      );
-    }
-    if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
-
+    checkSlotRules(court, startHour, hours, startAt);
     const { rows } = await tx.query<{ id: number }>(
       `INSERT INTO bookings (court_id, user_id, start_at, end_at, price_cents)
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [court.id, user.id, startAt, atHour(date, startHour + hours), court.hourlyPriceCents * hours],
     );
-    // Read back before COMMIT: once committed, nothing after it can fail and report a saved booking as an error.
-    booking = await findBooking(rows[0]!.id, tx);
-    await tx.query('COMMIT');
-    tx.release();
-  } catch (err) {
-    // If ROLLBACK fails the connection is broken: release(true) destroys it instead of returning it to the pool.
-    const broken = await tx.query('ROLLBACK').then(() => false, () => true);
-    tx.release(broken);
+    // Read back inside the transaction: once committed, nothing after it can fail and report a saved booking as an error.
+    return findBooking(rows[0]!.id, tx);
+  }).catch((err) => {
     // 23P01 = exclusion_violation from bookings_no_overlap: someone holds an overlapping confirmed booking.
     if (pgCode(err) === '23P01') throw new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
     throw err;
-  }
+  });
   publishAvailabilityChange(courtId, startAt);
   res.status(201).json(booking);
 });

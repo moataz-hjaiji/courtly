@@ -175,30 +175,113 @@ How it is built ([api/migrations/002_waitlist.sql](api/migrations/002_waitlist.s
 
 ### Performance note
 
+**Question:** do the two busiest read queries, availability and the admin day view, stay fast with a lot of data?
+**Answer:** yes. With 131,000 bookings, a typical request takes **under 1 ms** (availability) and **2 ms** (day view).
+
+#### Run it yourself
+
 ```bash
+docker compose up -d db
 docker compose --profile test run --rm api-test npm run perf
 ```
 
-[api/test/perf.ts](api/test/perf.ts) fills a separate `courtly_perf` database (your demo data is untouched) with
-**131,000 bookings**: 20 courts × 731 days (a year back, a year ahead) × 15 hours, 60% of slots booked, 10% of those
-cancelled. It then calls the real endpoints 500 times each, with random courts and days, and runs `EXPLAIN ANALYZE` on
-the exact SQL they sent.
+It takes about 15 seconds. It uses its own database, `courtly_perf`, so the demo data in `courtly` is not touched.
 
-Results (Docker on an Apple M3 Pro laptop; your numbers will vary a little):
+#### Test setup
 
-| Endpoint | p50 | p95 | DB execution time | Same query without indexes |
-|---|---|---|---|---|
-| `GET /courts/:id/availability` | 0.7 ms | 1.5 ms | 0.03 ms | 17 ms |
-| `GET /admin/bookings?date=` (day view, ~180 rows) | 2.0 ms | 3.2 ms | 0.26 ms | 6.5 ms |
+| | |
+|---|---|
+| Date of run | 5 November 2026 |
+| Machine | Apple M3 Pro laptop, Docker 29.7 |
+| Database | PostgreSQL 17.11 (`postgres:17-alpine`) |
+| API | Node 24 (`node:24-alpine`), Express 5, in the same container as the measuring script |
 
-Latency is end to end through the HTTP server, including JWT check, validation and JSON. Why it stays fast:
-- **Availability** reads one court for one day. It uses the GiST index that the `bookings_no_overlap` constraint
-  already created (`Bitmap Index Scan on bookings_no_overlap`), so the guarantee against double bookings doubles as
-  the index for this query. It touches about 10 rows, not 131,000.
-- **Admin day view** uses `bookings_start_idx` on `start_at` for the day's range, then joins courts and users by
-  primary key.
-- Both cost grows with *bookings per day*, not with total history. Without indexes Postgres has to scan the whole
-  table, which is already 25–600× slower at this size and keeps growing with every booking.
+#### Dataset
+
+| | |
+|---|---|
+| Bookings | **131,058** (118,359 confirmed, 12,699 cancelled) |
+| Courts | 20 (open 08:00–23:00) |
+| Users | 100 |
+| Time span | 731 days: one year back and one year ahead |
+| Fill rate | 60% of all slots booked |
+| Time to seed | 4.4 seconds (one `INSERT … SELECT` with `generate_series`) |
+
+#### Results
+
+Each endpoint was called **500 times** with a random court and a random day, after 20 warm-up calls.
+
+| Endpoint | Typical (p50) | Slow end (p95) | Slowest (max) | Time inside Postgres | Same query with indexes off |
+|---|---|---|---|---|---|
+| `GET /courts/:id/availability` | **0.7 ms** | 1.5 ms | 8.1 ms | 0.03 ms | 17.3 ms |
+| `GET /admin/bookings?date=` (≈190 rows) | **2.0 ms** | 3.2 ms | 53.9 ms | 0.26 ms | 6.5 ms |
+
+How to read the columns:
+- **p50**: half of the requests were faster than this. This is the normal experience.
+- **p95**: 95 of 100 requests were faster than this.
+- **max**: the single slowest request. The 54 ms outlier is a one-off pause in Node (garbage collection), not the
+  database: Postgres itself needs 0.26 ms for that query.
+- **Time inside Postgres**: `Execution Time` from `EXPLAIN ANALYZE` on the exact SQL the endpoint sent.
+- **Indexes off**: the same SQL with `enable_indexscan` and `enable_bitmapscan` turned off, so Postgres has to read
+  the whole table. This shows what the indexes are worth.
+
+All latencies are end to end through the HTTP server: JWT check, zod validation, the query and the JSON response.
+
+#### Why it stays fast
+
+- **Availability** reads one court on one day. Postgres uses the GiST index that the `bookings_no_overlap` constraint
+  already created (`Bitmap Index Scan on bookings_no_overlap`). It reads about 10 rows, not 131,000. The constraint
+  that prevents double bookings is also the index that makes this query fast; no extra index was needed.
+- **Admin day view** uses `bookings_start_idx` on `start_at` to find the day's bookings, then joins the court and user
+  by primary key.
+- Cost depends on **bookings per day**, not on total history. Another year of bookings does not slow these queries
+  down. Without the indexes the queries are already **25–600× slower**, and that gap grows with every booking.
+
+<details>
+<summary>Full output of the run, including both query plans</summary>
+
+```text
+seeded 131,058 bookings (118,359 confirmed), 20 courts, 100 users in 4.4s
+
+HTTP latency (in-process server, end to end incl. auth, JSON):
+GET /courts/:id/availability         500 requests   p50 0.7 ms   p95 1.5 ms   max 8.1 ms
+GET /admin/bookings (day view)       500 requests   p50 2.0 ms   p95 3.2 ms   max 53.9 ms
+
+Availability query plan  (/courts/1/availability?date=2026-11-05)
+  Bitmap Heap Scan on bookings  (cost=4.88..202.03 rows=59 width=20) (actual time=0.020..0.023 rows=7 loops=1)
+    Recheck Cond: ((court_id = 1) AND (tstzrange(start_at, end_at, '[)'::text) && '["2026-11-05 08:00:00+00","2026-11-05 23:00:00+00")'::tstzrange) AND (status = 'confirmed'::booking_status))
+    Heap Blocks: exact=7
+    Buffers: shared hit=11
+    ->  Bitmap Index Scan on bookings_no_overlap  (cost=0.00..4.87 rows=59 width=0) (actual time=0.018..0.018 rows=7 loops=1)
+          Index Cond: ((court_id = 1) AND (tstzrange(start_at, end_at, '[)'::text) && '["2026-11-05 08:00:00+00","2026-11-05 23:00:00+00")'::tstzrange))
+          Buffers: shared hit=4
+  Planning Time: 0.023 ms
+  Execution Time: 0.028 ms
+  Without indexes (sequential scan of all bookings): Execution Time: 17.281 ms
+
+Admin day-view query plan  (/admin/bookings?date=2026-11-05)
+  Sort  (cost=525.53..525.99 rows=183 width=89) (actual time=0.208..0.213 rows=193 loops=1)
+    Sort Key: b.start_at, c.name
+    Sort Method: quicksort  Memory: 47kB
+    ->  Hash Join  (cost=10.87..518.65 rows=183 width=89) (actual time=0.064..0.138 rows=193 loops=1)
+          Hash Cond: (b.user_id = u.id)
+          ->  Hash Join  (cost=7.62..514.90 rows=183 width=66) (actual time=0.033..0.089 rows=193 loops=1)
+                Hash Cond: (b.court_id = c.id)
+                ->  Bitmap Heap Scan on bookings b  (cost=6.17..512.87 rows=183 width=52) (actual time=0.017..0.039 rows=193 loops=1)
+                      Recheck Cond: ((start_at >= '2026-11-05 00:00:00+00'::timestamp with time zone) AND (start_at < '2026-11-06 00:00:00+00'::timestamp with time zone))
+                      ->  Bitmap Index Scan on bookings_start_idx  (cost=0.00..6.12 rows=183 width=0) (actual time=0.013..0.013 rows=193 loops=1)
+                            Index Cond: ((start_at >= '2026-11-05 00:00:00+00'::timestamp with time zone) AND (start_at < '2026-11-06 00:00:00+00'::timestamp with time zone))
+                ->  Hash  (cost=1.20..1.20 rows=20 width=18) (actual time=0.009..0.009 rows=20 loops=1)
+                      ->  Seq Scan on courts c  (cost=0.00..1.20 rows=20 width=18) (actual time=0.002..0.003 rows=20 loops=1)
+          ->  Hash  (cost=2.00..2.00 rows=100 width=27) (actual time=0.027..0.027 rows=100 loops=1)
+                ->  Seq Scan on users u  (cost=0.00..2.00 rows=100 width=27) (actual time=0.004..0.010 rows=100 loops=1)
+  Planning Time: 0.160 ms
+  Execution Time: 0.259 ms
+  Without indexes (sequential scan of all bookings): Execution Time: 6.496 ms
+```
+
+(Buffer lines trimmed from the day-view plan for readability.)
+</details>
 
 ## What I would do next
 

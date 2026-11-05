@@ -60,6 +60,9 @@ past booking, cancellation window).
 | POST | /bookings/:id/cancel | owner | until 2h before start |
 | GET | /admin/bookings?date=YYYY-MM-DD | admin | day's bookings + `totalRevenueCents` |
 | GET | /events | anyone | SSE: `availability` events `{ courtId, date }` |
+| POST | /waitlist | logged in | `{ courtId, date, startHour, hours }` — only for a slot booked by someone else |
+| GET | /waitlist/mine | logged in | entries with `status` and `position` in line |
+| POST | /waitlist/:id/leave | owner | stop waiting |
 
 ## Stack choices
 
@@ -85,10 +88,11 @@ trade-off is hand-mapping columns (`AS "camelCase"` in the queries) and no gener
 |---|---|
 | No double bookings, also under concurrency | `bookings_no_overlap` exclusion constraint — [api/migrations/001_init.sql](api/migrations/001_init.sql) |
 | Booking is 1 or 2 hours, starts on the hour | `CHECK` constraints in the same migration, plus zod in [bookings.ts](api/src/routes/bookings.ts) |
-| Within opening hours, not in the past, court active | `POST /bookings` in [bookings.ts](api/src/routes/bookings.ts), with the court row locked |
+| Within opening hours, not in the past, court active | `checkSlotRules` in [slots.ts](api/src/slots.ts), used by booking and waitlist, with the court row locked |
 | Cancel up to 2h before start | One atomic `UPDATE` in `POST /bookings/:id/cancel` |
 | Deactivating keeps history | No `DELETE` route; `PATCH { isActive: false }` — [courts.ts](api/src/routes/courts.ts) |
 | Price changes don't alter past revenue | `price_cents` is copied onto each booking when it is made |
+| Waitlist: auto-promotion on cancellation | `promoteWaitlist` in [waitlist.ts](api/src/routes/waitlist.ts), inside the cancel transaction |
 | Roles enforced by the API | `requireAuth` / `requireAdmin` middleware — [auth.ts](api/src/auth.ts) |
 
 ## How double bookings are prevented
@@ -127,7 +131,12 @@ Two related races are closed the same way, by letting Postgres order things:
 - **Cancelling right at the 2-hour limit, or twice at once.** Ownership, status and the time limit are all in the
   `WHERE` clause of a single `UPDATE`, so checking and changing happen together.
 
-## Bonus: real-time availability
+## Bonus features
+
+The brief asks candidates to pick **at most one** bonus. This reference solution implements two, real-time
+availability and the waitlist, so students can study both. In a real submission, pick one and finish it well.
+
+### Real-time availability
 
 `GET /api/events` is a Server-Sent Events stream. After a booking is created or cancelled, the API sends
 `event: availability` with `{ courtId, date }`. The booking page listens with `EventSource`, and when the change
@@ -141,6 +150,28 @@ disappears.
   the slots through the normal authenticated endpoint.
 - **Limit:** events go through an in-process `EventEmitter`, so they only reach clients connected to the same API
   instance. With several instances, Postgres `LISTEN/NOTIFY` would fan them out with no new infrastructure.
+
+### Waitlist
+
+When a slot is booked by someone else, a user can click it and **join the waitlist** (for 1 or 2 hours). The same
+rules as booking apply: opening hours, not in the past, court active. You can't wait for a free slot (just book it) or
+for your own booking. When the booking is cancelled, the oldest waiter whose time now fits **gets the booking
+automatically**; *My bookings* shows the entry as promoted and the new booking appears under *Upcoming*.
+
+How it is built ([api/migrations/002_waitlist.sql](api/migrations/002_waitlist.sql),
+[api/src/routes/waitlist.ts](api/src/routes/waitlist.ts)):
+- **Same transaction as the cancellation.** The freed slot is never visible as free to anyone else before the
+  waiter gets it.
+- **A promotion is a normal booking insert,** so the exclusion constraint still decides what fits. Someone waiting
+  for 10:00–12:00 when only 10:00–11:00 was freed is skipped (the insert fails with `23P01` inside a savepoint), and
+  the next person in line is tried.
+- **No double promotion under concurrency.** Each entry is locked with `FOR UPDATE SKIP LOCKED` inside its own
+  savepoint. Two cancellations at the same moment can't promote the same entry, and a failed attempt releases its lock
+  immediately (`ROLLBACK TO SAVEPOINT`), so it can't hide the entry from the other cancellation. A test cancels both
+  hours of a 2h waiter's slot at once and checks they get exactly one booking.
+- **One active entry per user and slot,** enforced by a partial unique index (`WHERE status = 'waiting'`).
+- `position` is computed on read (how many waiting entries on that court overlap yours and are older), so there is
+  no stored order to keep in sync.
 
 ## What I would do next
 
@@ -156,5 +187,7 @@ disappears.
    taken → 409 message), plus one Playwright end-to-end test against `docker compose up`.
 6. **Performance proof.** Seed 10k+ bookings and record `EXPLAIN ANALYZE` for the availability and admin day queries.
    The GiST index from the constraint should serve availability, and `bookings_start_idx` the day view.
-7. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
+7. **Waitlist notifications.** Promotion happens silently today; send an email or push message, and let people
+   choose to be asked first (with a time limit) instead of being booked automatically.
+8. **API polish.** Pagination for "my bookings", an OpenAPI spec generated from the zod schemas, and an admin cancel
    with a reason.

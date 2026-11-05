@@ -189,6 +189,14 @@ describe('cancellation window', () => {
 });
 
 describe('my bookings', () => {
+  it('keeps a booking that is in progress under upcoming until it ends', async () => {
+    const HOUR = 60 * 60 * 1000;
+    await insertBooking(2, new Date(Math.floor(Date.now() / HOUR) * HOUR)); // started this hour
+    const res = await alice.get('/bookings/mine');
+    expect(res.body.upcoming).toHaveLength(1);
+    expect(res.body.past).toHaveLength(0);
+  });
+
   it('splits upcoming and past, only for the caller', async () => {
     await insertBooking(2, new Date(`${daysFromNow(-3)}T10:00:00Z`));
     await book(alice, 10);

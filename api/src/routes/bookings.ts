@@ -54,17 +54,20 @@ bookingsRouter.post('/', async (req, res) => {
   res.status(201).json(booking);
 });
 
-/** The caller's bookings, split at "now" by start time. Cancelled ones are included with their status. */
+/**
+ * The caller's bookings. "Upcoming" means not finished yet, so a booking that is in progress stays there
+ * until it ends. Cancelled ones are included with their status.
+ */
 bookingsRouter.get('/mine', async (req, res) => {
-  const { rows } = await pool.query<{ startAt: Date }>(
+  const { rows } = await pool.query<{ endAt: Date }>(
     `SELECT ${BOOKING_COLUMNS} FROM bookings b JOIN courts c ON c.id = b.court_id
      WHERE b.user_id = $1 ORDER BY b.start_at`,
     [currentUser(req).id],
   );
   const now = Date.now();
   res.json({
-    upcoming: rows.filter((b) => b.startAt.getTime() > now),
-    past: rows.filter((b) => b.startAt.getTime() <= now).reverse(),
+    upcoming: rows.filter((b) => b.endAt.getTime() > now),
+    past: rows.filter((b) => b.endAt.getTime() <= now).reverse(),
   });
 });
 

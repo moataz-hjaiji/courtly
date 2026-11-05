@@ -27,8 +27,8 @@ All times are UTC.
 ### Tests
 
 ```bash
-docker compose --profile test run --rm api-test   # backend: 42 tests against a real Postgres
-docker compose --profile test run --rm web-test   # frontend: 61 tests in jsdom
+docker compose --profile test run --rm api-test   # backend: 46 tests against a real Postgres
+docker compose --profile test run --rm web-test   # frontend: 64 tests in jsdom
 ```
 
 - **Backend** (Vitest + supertest) runs against a real Postgres database (`courtly_test`), because the
@@ -113,6 +113,7 @@ trade-off is hand-mapping columns (`AS "camelCase"` in the queries) and no gener
 | Within opening hours, not in the past, court active | `checkSlotRules` in [slots.ts](api/src/slots.ts), used by booking and waitlist, with the court row locked |
 | Cancel up to 2h before start | One atomic `UPDATE` in `POST /bookings/:id/cancel` |
 | Deactivating keeps history | No `DELETE` route; `PATCH { isActive: false }` — [courts.ts](api/src/routes/courts.ts) |
+| Deactivating cancels future bookings | Same `PATCH`, in one transaction: future confirmed bookings → `cancelled` with `cancel_reason = 'court_deactivated'`, waitlist entries → `cancelled`. Past and running bookings stay. The admin confirms first (UI shows the count). |
 | Price changes don't alter past revenue | `price_cents` is copied onto each booking when it is made |
 | Waitlist: auto-promotion on cancellation | `promoteWaitlist` in [waitlist.ts](api/src/routes/waitlist.ts), inside the cancel transaction |
 | Roles enforced by the API | `requireAuth` / `requireAdmin` middleware — [auth.ts](api/src/auth.ts) |
@@ -309,8 +310,9 @@ Admin day-view query plan  (/admin/bookings?date=2026-11-05)
 
 1. **Facility time zone.** Everything runs in UTC now. Add a `timezone` setting and convert opening hours and "today"
    with a time-zone library, testing a daylight-saving day where a day has 23 or 25 hours.
-2. **Rules for existing bookings when a court changes.** Deactivating a court or shortening its hours leaves future
-   bookings that no longer fit. The admin should see them and choose to keep or cancel them (with a notification).
+2. **Shortening a court's hours.** Deactivating already cancels future bookings, but making opening hours shorter
+   still leaves bookings outside the new hours. Show them to the admin and cancel them the same way, and notify the
+   players (email) in both cases.
 3. **Safer sessions.** Move the JWT from `localStorage` to an `httpOnly` cookie with a refresh token, add rate
    limiting on `/auth/login`, and refuse to start in production without a real `JWT_SECRET`.
 4. **Real-time across instances** with Postgres `LISTEN/NOTIFY`, and on the booking page a "live" indicator that

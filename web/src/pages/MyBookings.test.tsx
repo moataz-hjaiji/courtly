@@ -72,4 +72,14 @@ describe('MyBookings', () => {
     expect(await screen.findByText('promoted · booked for you')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Leave' })).not.toBeInTheDocument()
   })
+
+  it('tells players when a booking was cancelled because the court closed', async () => {
+    mockApi({
+      'GET /bookings/mine': { upcoming: [booking({ status: 'cancelled', cancelReason: 'court_deactivated' }), booking({ id: 2, status: 'cancelled' })], past: [] },
+      'GET /waitlist/mine': [],
+    })
+    render(<MyBookings />)
+    expect(await screen.findByText('cancelled · court closed')).toBeInTheDocument()
+    expect(screen.getByText('cancelled')).toBeInTheDocument() // the one the player cancelled themselves
+  })
 })

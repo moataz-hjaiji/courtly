@@ -184,3 +184,6 @@ td.actions .row { justify-content: flex-end; gap: 0.5rem; }
 .calendar-day.today { border-color: var(--primary); font-weight: 700; }
 .calendar-day.selected { background: var(--primary); color: #fff; font-weight: 700; }
 .calendar-day:disabled { color: var(--border-strong); cursor: not-allowed; }
+.confirm-danger { border-color: #fecaca; background: linear-gradient(0deg, var(--danger-soft), var(--surface)); }
+.btn-danger-solid { background: var(--danger); color: #fff; }
+.btn-danger-solid:hover { background: #991b1b; }

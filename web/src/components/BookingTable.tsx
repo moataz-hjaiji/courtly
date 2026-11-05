@@ -28,7 +28,7 @@ export function BookingTable({ bookings, empty, onCancel }: Props) {
               <td className="num">{hhmm(b.startAt)}–{hhmm(b.endAt)}</td>
               <td><strong>{b.courtName}</strong> <span className="muted small">{b.sport}</span></td>
               <td className="num">{money(b.priceCents)}</td>
-              <td><Badge tone={statusTone(b.status)}>{b.status}</Badge></td>
+              <td><Badge tone={statusTone(b.status)}>{b.cancelReason === 'court_deactivated' ? 'cancelled · court closed' : b.status}</Badge></td>
               {onCancel && (
                 <td className="actions">
                   {b.status === 'confirmed' && <button className="btn btn-danger btn-sm" onClick={() => onCancel(b)}>Cancel</button>}

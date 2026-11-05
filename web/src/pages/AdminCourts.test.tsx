@@ -51,4 +51,34 @@ describe('AdminCourts', () => {
     expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ isActive: false })
     expect(await screen.findByRole('status')).toHaveTextContent('Padel 1 is now inactive.')
   })
+
+  it('asks before deactivating a court with future bookings, and reports how many were cancelled', async () => {
+    const calls = mockApi({
+      'GET /courts': [court({ futureBookings: 3 })],
+      'PATCH /courts/1': { ...court({ isActive: false }), cancelledBookings: 3 },
+    })
+    render(<AdminCourts />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deactivate' }))
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Deactivate Padel 1?' })
+    expect(dialog).toHaveTextContent('3 future bookings')
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false) // nothing sent yet
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Deactivate and cancel 3 future bookings' }))
+
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ isActive: false })
+    expect(await screen.findByRole('status')).toHaveTextContent('Padel 1 is now inactive. 3 future bookings were cancelled.')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('does nothing when the admin keeps the court open', async () => {
+    const calls = mockApi({ 'GET /courts': [court({ futureBookings: 1 })] })
+    render(<AdminCourts />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deactivate' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('1 future booking.')
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it open' }))
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+  })
 })

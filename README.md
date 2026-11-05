@@ -28,7 +28,7 @@ All times are UTC.
 
 ```bash
 docker compose --profile test run --rm api-test   # backend: 42 tests against a real Postgres
-docker compose --profile test run --rm web-test   # frontend: 54 tests in jsdom
+docker compose --profile test run --rm web-test   # frontend: 61 tests in jsdom
 ```
 
 - **Backend** (Vitest + supertest) runs against a real Postgres database (`courtly_test`), because the
@@ -45,9 +45,9 @@ docker compose --profile test run --rm web-test   # frontend: 54 tests in jsdom
 ```
 web/src/
   api/         client.ts (fetch wrapper, token, ApiError) · types.ts (API shapes)
-  utils/       format.ts (money, hours, UTC dates) · grid.ts (pure rules: book / waitlist / 2h / labels)
+  utils/       format.ts (money, hours, UTC dates) · calendar.ts (month grid) · grid.ts (pure rules: book / waitlist / 2h / labels)
   hooks/       useAvailability.ts (slots + my waitlist, refreshed by the live event stream)
-  components/  Logo, Badge, Alert, PageHeader, Empty, DayPicker, SlotGrid, BookingSummary,
+  components/  Logo, Badge, Alert, PageHeader, Empty, DayPicker, MonthCalendar, SlotGrid, BookingSummary,
                BookingTable, WaitlistTable, CourtForm
   pages/       Login, BookCourt, MyBookings, AdminCourts, AdminDay (state + layout only)
   test/        setup.ts (fixed clock, fake EventSource) · fakes.ts (fake API + test data)

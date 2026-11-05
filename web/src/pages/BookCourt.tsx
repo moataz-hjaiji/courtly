@@ -6,7 +6,7 @@ import { makeGrid } from '../utils/grid'
 import { useAvailability } from '../hooks/useAvailability'
 import { Alert, type Notice } from '../components/Alert'
 import { BookingSummary } from '../components/BookingSummary'
-import { DayPicker } from '../components/DayPicker'
+import { MonthCalendar } from '../components/MonthCalendar'
 import { PageHeader } from '../components/PageHeader'
 import { SlotGrid } from '../components/SlotGrid'
 
@@ -61,31 +61,34 @@ export function BookCourt() {
 
   return (
     <section className="stack-lg">
-      <PageHeader title="Book a court" subtitle="Pick a court and a day, then choose a free slot. All times are UTC." />
+      <PageHeader title="Book a court" subtitle="Pick a court and a day on the calendar, then choose a free slot. All times are UTC." />
 
-      <div className="card field-grid">
-        <label>Court
-          <select value={courtId ?? ''} onChange={(e) => choose(() => setCourtId(Number(e.target.value)))}>
-            {courts.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.sport} · {money(c.hourlyPriceCents)}/h</option>)}
-          </select>
-        </label>
-        <label>Day <DayPicker value={date} min={today()} onChange={(d) => choose(() => setDate(d))} /></label>
-      </div>
+      <div className="booking-layout">
+        <aside className="booking-side">
+          <div className="card stack">
+            <label>Court
+              <select value={courtId ?? ''} onChange={(e) => choose(() => setCourtId(Number(e.target.value)))}>
+                {courts.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.sport} · {money(c.hourlyPriceCents)}/h</option>)}
+              </select>
+            </label>
+            <MonthCalendar value={date} min={today()} onChange={(d) => choose(() => setDate(d))} />
+          </div>
+        </aside>
 
-      <div className="stack">
-        <div className="row">
-          <h2>{dayLabel(date)}</h2>
-          {court && <span className="muted small">Open {formatHour(court.openHour)}–{formatHour(court.closeHour)} · {grid.freeCount} free</span>}
+        <div className="booking-main">
+          <div className="row">
+            <h2>{dayLabel(date)}</h2>
+            {court && <span className="muted small">Open {formatHour(court.openHour)}–{formatHour(court.closeHour)} · {grid.freeCount} free</span>}
+          </div>
+          <SlotGrid slots={slots} grid={grid} selected={selected} duration={duration} priceCents={court?.hourlyPriceCents}
+            onSelect={(h) => { setSelected(h); setHours(1); setNotice(null) }} />
+          {mode && court && selected !== null && (
+            <BookingSummary court={court} date={date} start={selected} mode={mode} duration={duration}
+              canTwoHours={nextHourUsable} busy={busy} onDuration={setHours} onClear={() => setSelected(null)} onSubmit={submit} />
+          )}
+          <Alert notice={notice ?? (error ? { kind: 'error', text: error } : null)} />
         </div>
-        <SlotGrid slots={slots} grid={grid} selected={selected} duration={duration} priceCents={court?.hourlyPriceCents}
-          onSelect={(h) => { setSelected(h); setHours(1); setNotice(null) }} />
       </div>
-
-      {mode && court && selected !== null && (
-        <BookingSummary court={court} date={date} start={selected} mode={mode} duration={duration}
-          canTwoHours={nextHourUsable} busy={busy} onDuration={setHours} onClear={() => setSelected(null)} onSubmit={submit} />
-      )}
-      <Alert notice={notice ?? (error ? { kind: 'error', text: error } : null)} />
     </section>
   )
 }

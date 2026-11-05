@@ -166,3 +166,21 @@ td.actions .row { justify-content: flex-end; gap: 0.5rem; }
 .slot.mine { background: var(--info-soft); border-color: #93c5fd; color: var(--info); }
 .dot.mine { background: var(--info-soft); border-color: #93c5fd; }
 .summary > .stack { flex: 1 1 260px; }
+
+/* Booking page: calendar on the left, slots on the right */
+.booking-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.booking-side { display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 76px; }
+.booking-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+@media (max-width: 860px) {
+  .booking-layout { grid-template-columns: 1fr; }
+  .booking-side { position: static; }
+}
+
+.calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; }
+.calendar-weekday { text-align: center; font-size: 0.75rem; font-weight: 600; color: var(--subtle); padding: 0.25rem 0; }
+.calendar-day { font: inherit; font-variant-numeric: tabular-nums; aspect-ratio: 1; min-height: 38px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--fg); cursor: pointer; transition: background-color 150ms; }
+.calendar-day:hover:not(:disabled) { background: var(--primary-soft); }
+.calendar-day.today { border-color: var(--primary); font-weight: 700; }
+.calendar-day.selected { background: var(--primary); color: #fff; font-weight: 700; }
+.calendar-day:disabled { color: var(--border-strong); cursor: not-allowed; }

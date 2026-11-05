@@ -88,14 +88,14 @@ describe('BookCourt', () => {
     expect(availabilityCalls(calls)).toBe(2)
   })
 
-  it('loads the next day and clears the selection', async () => {
+  it('loads the day picked on the calendar and clears the selection', async () => {
     const calls = setup(slots(), { 'GET /courts/1/availability?date=2026-11-06': availability(slots({}, '2026-11-06')) })
     await userEvent.click(await screen.findByRole('button', { name: '10:00 €30.00' }))
     expect(screen.getByRole('button', { name: 'Confirm booking' })).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Next day' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Fri, 6 Nov 2026' }))
 
-    expect(await screen.findByText('Fri, 6 Nov 2026')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Fri, 6 Nov 2026' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Confirm booking' })).not.toBeInTheDocument()
     expect(calls.some((c) => c.query === '?date=2026-11-06')).toBe(true)
   })

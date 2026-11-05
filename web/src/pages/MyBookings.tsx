@@ -1,55 +1,65 @@
 import { useEffect, useState } from 'react'
-import { api, errorText, hhmm, money, ymd, type Booking } from '../api'
+import { api, dayLabel, errorText, hhmm, money, type Booking } from '../api'
+import { Alert, Badge, Empty, PageHeader, statusTone, type Notice } from '../ui'
 
 export function MyBookings() {
   const [data, setData] = useState<{ upcoming: Booking[]; past: Booking[] } | null>(null)
-  const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null)
+  const [notice, setNotice] = useState<Notice>(null)
 
   const load = () => api<{ upcoming: Booking[]; past: Booking[] }>('/bookings/mine').then(setData)
-  useEffect(() => { load().catch((e) => setMessage({ kind: 'error', text: errorText(e) })) }, [])
+  useEffect(() => { load().catch((e) => setNotice({ kind: 'error', text: errorText(e) })) }, [])
 
   async function cancel(b: Booking) {
-    setMessage(null)
+    setNotice(null)
     try {
       await api(`/bookings/${b.id}/cancel`, { method: 'POST' })
-      setMessage({ kind: 'success', text: `Cancelled ${b.courtName} on ${ymd(b.startAt)} at ${hhmm(b.startAt)}.` })
+      setNotice({ kind: 'success', text: `Cancelled ${b.courtName} on ${dayLabel(b.startAt)} at ${hhmm(b.startAt)}.` })
       await load()
     } catch (e) {
-      setMessage({ kind: 'error', text: errorText(e) })
+      setNotice({ kind: 'error', text: errorText(e) })
     }
   }
 
-  if (!data) return <p>Loading…</p>
+  if (!data) return <p className="muted">Loading…</p>
   return (
-    <section className="stack">
-      <h2>My bookings</h2>
-      {message && <p className={message.kind} role="alert">{message.text}</p>}
-      <h3>Upcoming</h3>
-      <BookingTable bookings={data.upcoming} onCancel={cancel} />
-      <p className="muted small">You can cancel up to 2 hours before the start time.</p>
-      <h3>Past</h3>
-      <BookingTable bookings={data.past} />
+    <section className="stack-lg">
+      <PageHeader title="My bookings" subtitle="You can cancel a booking up to 2 hours before it starts." />
+      <Alert notice={notice} />
+      <div className="stack">
+        <h2>Upcoming <span className="muted">({data.upcoming.filter((b) => b.status === 'confirmed').length})</span></h2>
+        <BookingTable bookings={data.upcoming} onCancel={cancel} empty="No upcoming bookings. Book a court to get started." />
+      </div>
+      <div className="stack">
+        <h2>Past</h2>
+        <BookingTable bookings={data.past} empty="No past bookings yet." />
+      </div>
     </section>
   )
 }
 
-function BookingTable({ bookings, onCancel }: { bookings: Booking[]; onCancel?: (b: Booking) => void }) {
-  if (!bookings.length) return <p className="muted">None.</p>
+function BookingTable({ bookings, onCancel, empty }: { bookings: Booking[]; onCancel?: (b: Booking) => void; empty: string }) {
+  if (!bookings.length) return <Empty>{empty}</Empty>
   return (
-    <table>
-      <thead><tr><th>Date</th><th>Time (UTC)</th><th>Court</th><th>Price</th><th>Status</th>{onCancel && <th />}</tr></thead>
-      <tbody>
-        {bookings.map((b) => (
-          <tr key={b.id} className={b.status}>
-            <td>{ymd(b.startAt)}</td>
-            <td>{hhmm(b.startAt)}–{hhmm(b.endAt)}</td>
-            <td>{b.courtName} <span className="muted">({b.sport})</span></td>
-            <td>{money(b.priceCents)}</td>
-            <td>{b.status}</td>
-            {onCancel && <td>{b.status === 'confirmed' && <button className="secondary" onClick={() => onCancel(b)}>Cancel</button>}</td>}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="card card-flush table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Time (UTC)</th><th>Court</th><th>Price</th><th>Status</th>{onCancel && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+        <tbody>
+          {bookings.map((b) => (
+            <tr key={b.id} className={b.status === 'cancelled' ? 'dimmed' : ''}>
+              <td>{dayLabel(b.startAt)}</td>
+              <td className="num">{hhmm(b.startAt)}–{hhmm(b.endAt)}</td>
+              <td><strong>{b.courtName}</strong> <span className="muted small">{b.sport}</span></td>
+              <td className="num">{money(b.priceCents)}</td>
+              <td><Badge tone={statusTone(b.status)}>{b.status}</Badge></td>
+              {onCancel && (
+                <td className="actions">
+                  {b.status === 'confirmed' && <button className="btn btn-danger btn-sm" onClick={() => onCancel(b)}>Cancel</button>}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

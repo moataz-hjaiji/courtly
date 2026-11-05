@@ -55,3 +55,6 @@ export const hhmm = (iso: string) => iso.slice(11, 16)
 export const ymd = (iso: string) => iso.slice(0, 10)
 export const today = () => new Date().toISOString().slice(0, 10)
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+/** "2026-11-05" -> "Thu, 5 Nov 2026" (UTC, so it matches the facility's day). */
+export const dayLabel = (day: string) =>
+  new Date(`${day.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })

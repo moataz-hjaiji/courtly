@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, auth, type User } from './api'
+import { Logo } from './ui'
 import { Login } from './pages/Login'
 import { BookCourt } from './pages/BookCourt'
 import { MyBookings } from './pages/MyBookings'
@@ -10,7 +11,7 @@ type Tab = 'book' | 'mine' | 'courts' | 'day'
 const TABS: { id: Tab; label: string; admin?: boolean }[] = [
   { id: 'book', label: 'Book a court' },
   { id: 'mine', label: 'My bookings' },
-  { id: 'courts', label: 'Manage courts', admin: true },
+  { id: 'courts', label: 'Courts', admin: true },
   { id: 'day', label: 'Day overview', admin: true },
 ]
 
@@ -24,21 +25,29 @@ export default function App() {
     api<User>('/auth/me').then(setUser).catch(() => auth.clear()).finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <p className="container">Loading…</p>
+  if (loading) return <p className="container muted">Loading…</p>
   if (!user) return <Login onLogin={setUser} />
 
   const logout = () => { auth.clear(); setUser(null); setTab('book') }
 
   return (
     <>
-      <header>
-        <strong>🎾 Courtly</strong>
-        <nav>
-          {TABS.filter((t) => !t.admin || user.role === 'admin').map((t) => (
-            <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>{t.label}</button>
-          ))}
-        </nav>
-        <span className="muted">{user.name} ({user.role}) <button className="link" onClick={logout}>Log out</button></span>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <Logo />
+          <nav className="tabs" aria-label="Main">
+            {TABS.filter((t) => !t.admin || user.role === 'admin').map((t) => (
+              <button key={t.id} className="tab" aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          <div className="user">
+            <span className="avatar" aria-hidden="true">{user.name[0]}</span>
+            <span className="name">{user.name}{user.role === 'admin' && <span className="muted"> · admin</span>}</span>
+            <button className="btn btn-ghost btn-sm" onClick={logout}>Log out</button>
+          </div>
+        </div>
       </header>
       <main className="container">
         {tab === 'book' && <BookCourt />}

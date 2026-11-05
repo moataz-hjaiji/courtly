@@ -65,9 +65,9 @@ bookingsRouter.post('/:id/cancel', async (req, res) => {
   const userId = currentUser(req).id;
   const cutoff = new Date(Date.now() + CANCELLATION_CUTOFF_HOURS * HOUR_MS);
 
-  // All rules live in one statement, so the check and the change happen atomically
-  // (no gap for the 2h boundary to pass, no double cancel). Waitlist promotion runs in the same transaction,
-  // so the freed slot is never visible as free to someone else first.
+  // All rules sit in the UPDATE's WHERE, so checking and changing happen at the same instant
+  // (no gap for the 2h limit to pass, no double cancel). Waitlist promotion runs in the same transaction,
+  // so nobody else can grab the freed slot before the next person in line gets it.
   const cancelled = await withTx(async (tx) => {
     const { rows } = await tx.query<{ court_id: number; start_at: Date; end_at: Date }>(
       `UPDATE bookings SET status = 'cancelled', cancelled_at = now()
@@ -76,27 +76,32 @@ bookingsRouter.post('/:id/cancel', async (req, res) => {
       [id, userId, cutoff],
     );
     const b = rows[0];
-    if (b) await promoteWaitlist(tx, b.court_id, b.start_at, b.end_at);
-    return b;
+    if (!b) return null;
+    await promoteWaitlist(tx, b.court_id, b.start_at, b.end_at);
+    return { courtId: b.court_id, startAt: b.start_at, booking: await findBooking(id, tx) };
   });
+
   if (cancelled) {
-    publishAvailabilityChange(cancelled.court_id, cancelled.start_at);
-    res.json(await findBooking(id));
+    publishAvailabilityChange(cancelled.courtId, cancelled.startAt);
+    res.json(cancelled.booking);
     return;
   }
+  throw await whyNotCancellable(id, userId);
+});
 
-  // Nothing updated: look the booking up only to explain why.
-  const found = await pool.query<{ user_id: number; status: string }>('SELECT user_id, status FROM bookings WHERE id = $1', [id]);
-  const b = found.rows[0];
+/** Nothing was cancelled: look the booking up only to explain why. */
+async function whyNotCancellable(id: number, userId: number): Promise<AppError> {
+  const { rows } = await pool.query<{ user_id: number; status: string }>('SELECT user_id, status FROM bookings WHERE id = $1', [id]);
+  const b = rows[0];
   // Someone else's booking is reported as missing so ids can't be probed.
-  if (!b || b.user_id !== userId) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
-  if (b.status === 'cancelled') throw new AppError(409, 'ALREADY_CANCELLED', 'Booking is already cancelled');
-  throw new AppError(
+  if (!b || b.user_id !== userId) return new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
+  if (b.status === 'cancelled') return new AppError(409, 'ALREADY_CANCELLED', 'Booking is already cancelled');
+  return new AppError(
     422,
     'CANCELLATION_WINDOW_CLOSED',
     `Bookings can only be cancelled up to ${CANCELLATION_CUTOFF_HOURS} hours before they start`,
   );
-});
+}
 
 async function findBooking(id: number, db: Pick<PoolClient, 'query'> = pool) {
   const { rows } = await db.query(`SELECT ${BOOKING_COLUMNS} FROM bookings b JOIN courts c ON c.id = b.court_id WHERE b.id = $1`, [id]);

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { PoolClient } from 'pg';
 import { pool } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
@@ -31,6 +32,7 @@ bookingsRouter.post('/', async (req, res) => {
   // The court row is locked FOR SHARE until COMMIT, so an admin deactivating it or changing its hours
   // either finishes first (and we see the new values) or waits until this booking is in.
   const tx = await pool.connect();
+  let booking: unknown;
   try {
     await tx.query('BEGIN');
     const court = await findCourt(courtId, false, tx);
@@ -48,17 +50,20 @@ bookingsRouter.post('/', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [court.id, user.id, startAt, atHour(date, startHour + hours), court.hourlyPriceCents * hours],
     );
+    // Read back before COMMIT: once committed, nothing after it can fail and report a saved booking as an error.
+    booking = await findBooking(rows[0]!.id, tx);
     await tx.query('COMMIT');
-    publishAvailabilityChange(court.id, startAt);
-    res.status(201).json(await findBooking(rows[0]!.id));
+    tx.release();
   } catch (err) {
-    await tx.query('ROLLBACK');
+    // If ROLLBACK fails the connection is broken: release(true) destroys it instead of returning it to the pool.
+    const broken = await tx.query('ROLLBACK').then(() => false, () => true);
+    tx.release(broken);
     // 23P01 = exclusion_violation from bookings_no_overlap: someone holds an overlapping confirmed booking.
     if (pgCode(err) === '23P01') throw new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
     throw err;
-  } finally {
-    tx.release();
   }
+  publishAvailabilityChange(courtId, startAt);
+  res.status(201).json(booking);
 });
 
 /** The caller's bookings, split at "now" by start time. Cancelled ones are included with their status. */
@@ -107,7 +112,7 @@ bookingsRouter.post('/:id/cancel', async (req, res) => {
   );
 });
 
-async function findBooking(id: number) {
-  const { rows } = await pool.query(`SELECT ${BOOKING_COLUMNS} FROM bookings b JOIN courts c ON c.id = b.court_id WHERE b.id = $1`, [id]);
+async function findBooking(id: number, db: Pick<PoolClient, 'query'> = pool) {
+  const { rows } = await db.query(`SELECT ${BOOKING_COLUMNS} FROM bookings b JOIN courts c ON c.id = b.court_id WHERE b.id = $1`, [id]);
   return rows[0];
 }

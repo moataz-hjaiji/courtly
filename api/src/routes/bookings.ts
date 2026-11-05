@@ -4,7 +4,9 @@ import { pool } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { findCourt } from './courts.js';
-import { atHour, dayParam } from '../time.js';
+import { atHour, dayParam, HOUR_MS } from '../time.js';
+
+export const CANCELLATION_CUTOFF_HOURS = 2;
 
 export const bookingsRouter = Router();
 bookingsRouter.use(requireAuth);
@@ -48,6 +50,46 @@ bookingsRouter.post('/', async (req, res) => {
     if (pgCode(err) === '23P01') throw new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
     throw err;
   }
+});
+
+/** The caller's bookings, split at "now" by start time. Cancelled ones are included with their status. */
+bookingsRouter.get('/mine', async (req, res) => {
+  const { rows } = await pool.query<{ startAt: Date }>(
+    `SELECT ${BOOKING_COLUMNS} FROM bookings b JOIN courts c ON c.id = b.court_id
+     WHERE b.user_id = $1 ORDER BY b.start_at`,
+    [currentUser(req).id],
+  );
+  const now = Date.now();
+  res.json({
+    upcoming: rows.filter((b) => b.startAt.getTime() > now),
+    past: rows.filter((b) => b.startAt.getTime() <= now).reverse(),
+  });
+});
+
+bookingsRouter.post('/:id/cancel', async (req, res) => {
+  const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(req.params);
+  const { rows } = await pool.query<{ user_id: number; start_at: Date; status: string }>(
+    'SELECT user_id, start_at, status FROM bookings WHERE id = $1',
+    [id],
+  );
+  const b = rows[0];
+  // Someone else's booking is reported as missing so ids can't be probed.
+  if (!b || b.user_id !== currentUser(req).id) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
+  if (b.status === 'cancelled') throw new AppError(409, 'ALREADY_CANCELLED', 'Booking is already cancelled');
+  if (b.start_at.getTime() - Date.now() < CANCELLATION_CUTOFF_HOURS * HOUR_MS) {
+    throw new AppError(
+      422,
+      'CANCELLATION_WINDOW_CLOSED',
+      `Bookings can only be cancelled up to ${CANCELLATION_CUTOFF_HOURS} hours before they start`,
+    );
+  }
+  // status guard makes a double-click / concurrent cancel a no-op instead of a second update.
+  const updated = await pool.query(
+    "UPDATE bookings SET status = 'cancelled', cancelled_at = now() WHERE id = $1 AND status = 'confirmed'",
+    [id],
+  );
+  if (!updated.rowCount) throw new AppError(409, 'ALREADY_CANCELLED', 'Booking is already cancelled');
+  res.json(await findBooking(id));
 });
 
 async function findBooking(id: number) {

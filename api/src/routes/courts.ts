@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { PoolClient } from 'pg';
 import { pool } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
@@ -34,9 +35,15 @@ const createBody = courtFields.partial({ isActive: true });
 const updateBody = courtFields.partial();
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
-/** Users only see active courts; admins see all (to reactivate/edit them). */
-export async function findCourt(id: number, includeInactive: boolean): Promise<Court> {
-  const { rows } = await pool.query<Court>(`SELECT ${COURT_COLUMNS} FROM courts WHERE id = $1`, [id]);
+/**
+ * Users only see active courts; admins see all (to reactivate/edit them).
+ * Pass a transaction client to also lock the row FOR SHARE until that transaction ends.
+ */
+export async function findCourt(id: number, includeInactive: boolean, tx?: PoolClient): Promise<Court> {
+  const { rows } = await (tx ?? pool).query<Court>(
+    `SELECT ${COURT_COLUMNS} FROM courts WHERE id = $1 ${tx ? 'FOR SHARE' : ''}`,
+    [id],
+  );
   const court = rows[0];
   if (!court || (!court.isActive && !includeInactive)) throw new AppError(404, 'COURT_NOT_FOUND', 'Court not found');
   return court;

@@ -82,6 +82,26 @@ describe('booking validation', () => {
     expect((await book(alice, 10, 3)).status).toBe(400);
   });
 
+  it('does not book a court that an admin is deactivating at the same moment', async () => {
+    const admin = await pool.connect();
+    try {
+      await admin.query('BEGIN');
+      await admin.query('UPDATE courts SET is_active = false WHERE id = 1'); // holds the row lock, not committed yet
+      const pending = book(alice, 10).then((r) => r); // .then starts the request
+      // Wait until the booking is actually blocked on the court row lock.
+      await expect.poll(async () => {
+        const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'");
+        return rows[0].n;
+      }).toBe(1);
+      await admin.query('COMMIT');
+      const res = await pending;
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('COURT_NOT_FOUND');
+    } finally {
+      admin.release();
+    }
+  });
+
   it('rejects bookings on an inactive court', async () => {
     const res = await book(alice, 10, 1, 2);
     expect(res.status).toBe(404);

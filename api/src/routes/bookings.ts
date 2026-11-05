@@ -26,31 +26,38 @@ const createBody = z.object({
 bookingsRouter.post('/', async (req, res) => {
   const user = currentUser(req);
   const { courtId, date, startHour, hours } = createBody.parse(req.body);
-  const court = await findCourt(courtId, false);
-
-  if (startHour < court.openHour || startHour + hours > court.closeHour) {
-    throw new AppError(
-      422,
-      'OUTSIDE_OPENING_HOURS',
-      `${court.name} is open ${court.openHour}:00–${court.closeHour}:00; a ${hours}h booking at ${startHour}:00 does not fit`,
-    );
-  }
   const startAt = atHour(date, startHour);
-  if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
 
+  // The court row is locked FOR SHARE until COMMIT, so an admin deactivating it or changing its hours
+  // either finishes first (and we see the new values) or waits until this booking is in.
+  const tx = await pool.connect();
   try {
-    const { rows } = await pool.query<{ id: number }>(
+    await tx.query('BEGIN');
+    const court = await findCourt(courtId, false, tx);
+    if (startHour < court.openHour || startHour + hours > court.closeHour) {
+      throw new AppError(
+        422,
+        'OUTSIDE_OPENING_HOURS',
+        `${court.name} is open ${court.openHour}:00–${court.closeHour}:00; a ${hours}h booking at ${startHour}:00 does not fit`,
+      );
+    }
+    if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
+
+    const { rows } = await tx.query<{ id: number }>(
       `INSERT INTO bookings (court_id, user_id, start_at, end_at, price_cents)
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [court.id, user.id, startAt, atHour(date, startHour + hours), court.hourlyPriceCents * hours],
     );
-    const booking = await findBooking(rows[0]!.id);
+    await tx.query('COMMIT');
     publishAvailabilityChange(court.id, startAt);
-    res.status(201).json(booking);
+    res.status(201).json(await findBooking(rows[0]!.id));
   } catch (err) {
+    await tx.query('ROLLBACK');
     // 23P01 = exclusion_violation from bookings_no_overlap: someone holds an overlapping confirmed booking.
     if (pgCode(err) === '23P01') throw new AppError(409, 'SLOT_TAKEN', 'This slot was just booked by someone else');
     throw err;
+  } finally {
+    tx.release();
   }
 });
 

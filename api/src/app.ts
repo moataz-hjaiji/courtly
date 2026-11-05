@@ -3,6 +3,7 @@ import { errorHandler } from './errors.js';
 import { authRouter } from './routes/auth.js';
 import { courtsRouter } from './routes/courts.js';
 import { bookingsRouter } from './routes/bookings.js';
+import { adminRouter } from './routes/admin.js';
 
 export function createApp() {
   const app = express();
@@ -13,6 +14,7 @@ export function createApp() {
   app.use('/auth', authRouter);
   app.use('/courts', courtsRouter);
   app.use('/bookings', bookingsRouter);
+  app.use('/admin', adminRouter);
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
   });

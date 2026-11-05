@@ -31,16 +31,29 @@ export function BookCourt() {
 
   useEffect(() => { setSelected(null); loadSlots() }, [loadSlots])
 
+  // Live updates: the stream only says "court X on day Y changed"; we refetch through the authed API.
+  useEffect(() => {
+    const source = new EventSource('/api/events')
+    source.addEventListener('availability', (e) => {
+      const change = JSON.parse((e as MessageEvent<string>).data) as { courtId: number; date: string }
+      if (change.courtId === courtId && change.date === date) loadSlots()
+    })
+    return () => source.close()
+  }, [courtId, date, loadSlots])
+
   const court = courts.find((c) => c.id === courtId)
   const isFree = (h: number) => slots.find((s) => s.hour === h)?.status === 'available'
-  const canTwoHours = selected !== null && isFree(selected + 1)
+  // Derived, so a live update that takes the selected slot (or the hour after it) hides/limits the choice.
+  const selectedFree = selected !== null && isFree(selected)
+  const canTwoHours = selectedFree && isFree(selected + 1)
+  const duration: 1 | 2 = canTwoHours ? hours : 1
 
   async function book() {
-    if (!court || selected === null) return
+    if (!court || !selectedFree) return
     setMessage(null)
     try {
-      const b = await api<Booking>('/bookings', { method: 'POST', body: { courtId: court.id, date, startHour: selected, hours } })
-      setMessage({ kind: 'success', text: `Booked ${b.courtName} at ${selected}:00 for ${hours}h (${money(b.priceCents)}).` })
+      const b = await api<Booking>('/bookings', { method: 'POST', body: { courtId: court.id, date, startHour: selected, hours: duration } })
+      setMessage({ kind: 'success', text: `Booked ${b.courtName} at ${selected}:00 for ${duration}h (${money(b.priceCents)}).` })
     } catch (e) {
       setMessage({ kind: 'error', text: errorText(e) })
     }
@@ -76,14 +89,14 @@ export function BookCourt() {
         ))}
       </div>
 
-      {selected !== null && court && (
+      {selectedFree && court && (
         <div className="card row">
           <span>{court.name}, {date} at {selected}:00 for</span>
-          <select value={hours} onChange={(e) => setHours(Number(e.target.value) as 1 | 2)}>
+          <select value={duration} onChange={(e) => setHours(Number(e.target.value) as 1 | 2)}>
             <option value={1}>1 hour</option>
             <option value={2} disabled={!canTwoHours}>2 hours{canTwoHours ? '' : ' (next slot not free)'}</option>
           </select>
-          <strong>{money(court.hourlyPriceCents * hours)}</strong>
+          <strong>{money(court.hourlyPriceCents * duration)}</strong>
           <button onClick={book}>Confirm booking</button>
           <button className="secondary" onClick={() => setSelected(null)}>Cancel</button>
         </div>

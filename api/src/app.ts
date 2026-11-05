@@ -4,6 +4,7 @@ import { authRouter } from './routes/auth.js';
 import { courtsRouter } from './routes/courts.js';
 import { bookingsRouter } from './routes/bookings.js';
 import { adminRouter } from './routes/admin.js';
+import { waitlistRouter } from './routes/waitlist.js';
 import { availabilityEvents } from './events.js';
 
 export function createApp() {
@@ -16,6 +17,7 @@ export function createApp() {
   app.use('/auth', authRouter);
   app.use('/courts', courtsRouter);
   app.use('/bookings', bookingsRouter);
+  app.use('/waitlist', waitlistRouter);
   app.use('/admin', adminRouter);
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

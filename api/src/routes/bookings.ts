@@ -4,8 +4,10 @@ import type { PoolClient } from 'pg';
 import { pool, withTx } from '../db.js';
 import { AppError, pgCode } from '../errors.js';
 import { currentUser, requireAuth } from '../auth.js';
-import { findCourt, type Court } from './courts.js';
-import { atHour, dayParam, HOUR_MS } from '../time.js';
+import { findCourt } from './courts.js';
+import { checkSlotRules, slotBody } from '../slots.js';
+import { promoteWaitlist } from './waitlist.js';
+import { atHour, HOUR_MS } from '../time.js';
 import { publishAvailabilityChange } from '../events.js';
 
 const CANCELLATION_CUTOFF_HOURS = 2;
@@ -17,25 +19,6 @@ export const BOOKING_COLUMNS = `b.id, b.court_id AS "courtId", c.name AS "courtN
   b.start_at AS "startAt", b.end_at AS "endAt", b.price_cents AS "priceCents", b.status,
   b.created_at AS "createdAt", b.cancelled_at AS "cancelledAt"`;
 
-/** Body for booking a slot or joining its waitlist. */
-export const slotBody = z.object({
-  courtId: z.number().int().positive(),
-  date: dayParam,
-  startHour: z.number().int().min(0).max(23),
-  hours: z.union([z.literal(1), z.literal(2)]),
-});
-
-/** Rules shared by booking and joining the waitlist. Throws a 422 AppError when a rule is broken. */
-export function checkSlotRules(court: Court, startHour: number, hours: number, startAt: Date): void {
-  if (startHour < court.openHour || startHour + hours > court.closeHour) {
-    throw new AppError(
-      422,
-      'OUTSIDE_OPENING_HOURS',
-      `${court.name} is open ${court.openHour}:00–${court.closeHour}:00; a ${hours}h booking at ${startHour}:00 does not fit`,
-    );
-  }
-  if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
-}
 
 bookingsRouter.post('/', async (req, res) => {
   const user = currentUser(req);
@@ -83,15 +66,21 @@ bookingsRouter.post('/:id/cancel', async (req, res) => {
   const cutoff = new Date(Date.now() + CANCELLATION_CUTOFF_HOURS * HOUR_MS);
 
   // All rules live in one statement, so the check and the change happen atomically
-  // (no gap for the 2h boundary to pass, no double cancel).
-  const { rows } = await pool.query<{ court_id: number; start_at: Date }>(
-    `UPDATE bookings SET status = 'cancelled', cancelled_at = now()
-     WHERE id = $1 AND user_id = $2 AND status = 'confirmed' AND start_at >= $3
-     RETURNING court_id, start_at`,
-    [id, userId, cutoff],
-  );
-  if (rows[0]) {
-    publishAvailabilityChange(rows[0].court_id, rows[0].start_at);
+  // (no gap for the 2h boundary to pass, no double cancel). Waitlist promotion runs in the same transaction,
+  // so the freed slot is never visible as free to someone else first.
+  const cancelled = await withTx(async (tx) => {
+    const { rows } = await tx.query<{ court_id: number; start_at: Date; end_at: Date }>(
+      `UPDATE bookings SET status = 'cancelled', cancelled_at = now()
+       WHERE id = $1 AND user_id = $2 AND status = 'confirmed' AND start_at >= $3
+       RETURNING court_id, start_at, end_at`,
+      [id, userId, cutoff],
+    );
+    const b = rows[0];
+    if (b) await promoteWaitlist(tx, b.court_id, b.start_at, b.end_at);
+    return b;
+  });
+  if (cancelled) {
+    publishAvailabilityChange(cancelled.court_id, cancelled.start_at);
     res.json(await findBooking(id));
     return;
   }

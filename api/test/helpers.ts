@@ -14,7 +14,7 @@ export const tokens = {
 
 /** Fresh fixed data: users 1-3, court 1 (open 8-23, 30.00/h), court 2 inactive. */
 export async function resetDb() {
-  await pool.query('TRUNCATE bookings, courts, users RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE waitlist_entries, bookings, courts, users RESTART IDENTITY CASCADE');
   await pool.query(`INSERT INTO users (email, name, password_hash, role) VALUES
     ('admin@t', 'Admin', 'x', 'admin'), ('alice@t', 'Alice', 'x', 'user'), ('bob@t', 'Bob', 'x', 'user')`);
   await pool.query(`INSERT INTO courts (name, sport, hourly_price_cents, open_hour, close_hour, is_active) VALUES

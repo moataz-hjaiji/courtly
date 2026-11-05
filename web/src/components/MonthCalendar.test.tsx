@@ -39,4 +39,11 @@ describe('MonthCalendar', () => {
     rerender(<MonthCalendar value="2027-01-10" onChange={() => {}} />)
     expect(screen.getByText('January 2027')).toBeInTheDocument()
   })
+
+  it("doesn't allow days after the maximum, or months after it", () => {
+    render(<MonthCalendar value="2026-11-05" min="2026-11-05" max="2026-11-20" onChange={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Fri, 20 Nov 2026' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Sat, 21 Nov 2026' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled()
+  })
 })

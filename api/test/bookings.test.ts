@@ -81,6 +81,14 @@ describe('booking validation', () => {
     expect(res.body.error.code).toBe('BOOKING_IN_PAST');
   });
 
+  it('rejects bookings more than 90 days ahead', async () => {
+    expect((await book(alice, 10, 1, 1, daysFromNow(89))).status).toBe(201);
+    const res = await book(alice, 10, 1, 1, daysFromNow(91));
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('BOOKING_TOO_FAR_AHEAD');
+    expect((await book(alice, 10, 1, 1, '9999-12-31')).body.error.code).toBe('BOOKING_TOO_FAR_AHEAD');
+  });
+
   it('rejects durations other than 1 or 2 hours', async () => {
     expect((await book(alice, 10, 3)).status).toBe(400);
   });

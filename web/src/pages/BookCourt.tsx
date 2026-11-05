@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { Booking, Court, WaitlistEntry } from '../api/types'
-import { dayLabel, errorText, formatHour, money, today } from '../utils/format'
+import { addDays, dayLabel, errorText, formatHour, money, today } from '../utils/format'
+
+// Same limit as MAX_DAYS_AHEAD in api/src/slots.ts; the API enforces it, the calendar just hides later days.
+const MAX_DAYS_AHEAD = 90
 import { makeGrid } from '../utils/grid'
 import { useAvailability } from '../hooks/useAvailability'
 import { Alert, type Notice } from '../components/Alert'
@@ -71,7 +74,7 @@ export function BookCourt() {
                 {courts.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.sport} · {money(c.hourlyPriceCents)}/h</option>)}
               </select>
             </label>
-            <MonthCalendar value={date} min={today()} onChange={(d) => choose(() => setDate(d))} />
+            <MonthCalendar value={date} min={today()} max={addDays(today(), MAX_DAYS_AHEAD)} onChange={(d) => choose(() => setDate(d))} />
           </div>
         </aside>
 

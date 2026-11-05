@@ -15,6 +15,9 @@ export const slotBody = z.object({
 export const fitsOpeningHours = (court: Pick<Court, 'openHour' | 'closeHour'>, startHour: number, hours: number) =>
   startHour >= court.openHour && startHour + hours <= court.closeHour;
 
+/** How far ahead a slot can be booked or waited for. The web calendar uses the same number. */
+export const MAX_DAYS_AHEAD = 90;
+
 /** Rules shared by booking and joining the waitlist. Throws a 422 AppError when a rule is broken. */
 export function checkSlotRules(court: Court, startHour: number, hours: number, startAt: Date): void {
   if (!fitsOpeningHours(court, startHour, hours)) {
@@ -25,4 +28,7 @@ export function checkSlotRules(court: Court, startHour: number, hours: number, s
     );
   }
   if (startAt.getTime() <= Date.now()) throw new AppError(422, 'BOOKING_IN_PAST', 'Cannot book a slot that has already started');
+  if (startAt.getTime() > Date.now() + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000) {
+    throw new AppError(422, 'BOOKING_TOO_FAR_AHEAD', `Bookings open ${MAX_DAYS_AHEAD} days ahead`);
+  }
 }

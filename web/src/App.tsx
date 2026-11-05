@@ -3,11 +3,15 @@ import { api, auth, type User } from './api'
 import { Login } from './pages/Login'
 import { BookCourt } from './pages/BookCourt'
 import { MyBookings } from './pages/MyBookings'
+import { AdminCourts } from './pages/AdminCourts'
+import { AdminDay } from './pages/AdminDay'
 
-type Tab = 'book' | 'mine'
+type Tab = 'book' | 'mine' | 'courts' | 'day'
 const TABS: { id: Tab; label: string; admin?: boolean }[] = [
   { id: 'book', label: 'Book a court' },
   { id: 'mine', label: 'My bookings' },
+  { id: 'courts', label: 'Manage courts', admin: true },
+  { id: 'day', label: 'Day overview', admin: true },
 ]
 
 export default function App() {
@@ -39,6 +43,8 @@ export default function App() {
       <main className="container">
         {tab === 'book' && <BookCourt />}
         {tab === 'mine' && <MyBookings />}
+        {tab === 'courts' && <AdminCourts />}
+        {tab === 'day' && <AdminDay />}
       </main>
     </>
   )

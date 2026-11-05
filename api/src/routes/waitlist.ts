@@ -98,27 +98,32 @@ export async function promoteWaitlist(tx: PoolClient, courtId: number, freedStar
   for (const w of candidates) {
     const hours = (w.end_at.getTime() - w.start_at.getTime()) / HOUR_MS;
     // The court's hours may have changed since this person joined: only promote into today's opening hours.
-    if (!fitsOpeningHours({ openHour: w.open_hour, closeHour: w.close_hour }, w.start_at.getUTCHours(), hours)) continue;
+    if (fitsOpeningHours({ openHour: w.open_hour, closeHour: w.close_hour }, w.start_at.getUTCHours(), hours)) {
+      await tryPromote(tx, courtId, w, w.hourly_price_cents * hours);
+    }
+  }
+}
 
-    await tx.query('SAVEPOINT promote');
-    try {
-      const { rowCount } = await tx.query(
-        "SELECT 1 FROM waitlist_entries WHERE id = $1 AND status = 'waiting' FOR UPDATE SKIP LOCKED",
-        [w.id],
-      );
-      if (!rowCount) {
-        await tx.query('ROLLBACK TO SAVEPOINT promote'); // already handled by another transaction
-        continue;
-      }
+/** Tries to turn one waiting entry into a booking. If it can't, a savepoint undoes just this attempt. */
+async function tryPromote(
+  tx: PoolClient, courtId: number, w: { id: number; user_id: number; start_at: Date; end_at: Date }, priceCents: number,
+): Promise<void> {
+  await tx.query('SAVEPOINT promote');
+  try {
+    // SKIP LOCKED: another cancellation is handling this entry right now, so leave it to them.
+    const locked = await tx.query("SELECT 1 FROM waitlist_entries WHERE id = $1 AND status = 'waiting' FOR UPDATE SKIP LOCKED", [w.id]);
+    if (locked.rowCount) {
       const { rows } = await tx.query<{ id: number }>(
         'INSERT INTO bookings (court_id, user_id, start_at, end_at, price_cents) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-        [courtId, w.user_id, w.start_at, w.end_at, w.hourly_price_cents * hours],
+        [courtId, w.user_id, w.start_at, w.end_at, priceCents],
       );
       await tx.query("UPDATE waitlist_entries SET status = 'promoted', booking_id = $2 WHERE id = $1", [w.id, rows[0]!.id]);
       await tx.query('RELEASE SAVEPOINT promote');
-    } catch (err) {
-      if (pgCode(err) !== '23P01') throw err;
-      await tx.query('ROLLBACK TO SAVEPOINT promote'); // still overlaps another booking: leave it waiting
+      return;
     }
+  } catch (err) {
+    if (pgCode(err) !== '23P01') throw err; // 23P01: the slot still overlaps another booking
   }
+  // Not promoted: undo this attempt only (this also releases the row lock right away).
+  await tx.query('ROLLBACK TO SAVEPOINT promote');
 }

@@ -90,7 +90,7 @@ describe('booking validation', () => {
       const pending = book(alice, 10).then((r) => r); // .then starts the request
       // Wait until the booking is actually blocked on the court row lock.
       await expect.poll(async () => {
-        const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'");
+        const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()");
         return rows[0].n;
       }).toBe(1);
       await admin.query('COMMIT');

@@ -15,6 +15,9 @@ export class AppError extends Error {
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof AppError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
+  } else if (err?.type === 'entity.parse.failed') {
+    // thrown by express.json() for a body that isn't valid JSON
+    res.status(400).json({ error: { code: 'INVALID_JSON', message: 'Request body is not valid JSON' } });
   } else if (err instanceof ZodError) {
     res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request', details: err.issues } });
   } else {

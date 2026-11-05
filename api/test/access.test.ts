@@ -29,6 +29,14 @@ describe('role separation is enforced by the API', () => {
   });
 });
 
+describe('error handling', () => {
+  it('answers malformed JSON with 400, not 500', async () => {
+    const res = await request(app).post('/auth/login').set('content-type', 'application/json').send('{bad');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_JSON');
+  });
+});
+
 describe('admin courts', () => {
   const admin = as(tokens.admin);
 
